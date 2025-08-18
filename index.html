@@ -431,16 +431,21 @@ function safeInit(){
 
     eventClick: async (info)=>{
       const e=info.event, p=e.extendedProps||{};
+// eventClick 안의 배경 삭제 부분만 교체
       if(e.display==='background' && p.blocked){
         if(!EDIT_MODE) return;
         const id = (e.id||'').replace(/_bg$/,'');
         if(confirm('이 촬영 불가를 삭제할까요?')){
-          const r=await apiDelete(id);
-          if(!r || !r.ok){ alert('삭제 실패'); return; }
+          const r = await apiDelete(id);
+          if(!r || !r.ok){
+            alert('삭제 실패: ' + (r?.error || 'UNKNOWN'));
+            return;
+          }
           calendar.refetchEvents();
         }
         return;
       }
+
       if(!EDIT_MODE) return;
       openModal('edit',{
         id:e.id, title:p.blocked?"":e.title, type:p.type||"", pkg:p.pkg||"",
@@ -601,14 +606,20 @@ form.addEventListener("submit", async (e)=>{
   }catch(err){ console.error(err); alert("저장 중 예기치 않은 오류: " + String(err)); statusEl.textContent = "오류"; }
 });
 
-btnDelete.onclick=async()=>{
+btnDelete.onclick = async ()=>{
   if(!EDIT_MODE || !currentEditingId) return;
   if(!confirm("정말 삭제할까요? (시트의 ‘삭제’ 열에 표기됩니다)")) return;
-  const r=await apiDelete(currentEditingId);
-  if(!r.ok){ alert("삭제 실패"); return; }
+  const r = await apiDelete(currentEditingId);
+  if(!r || !r.ok){
+    alert("삭제 실패: " + (r?.error || "UNKNOWN"));
+    return;
+  }
   closeModal(); calendar.refetchEvents();
+};
+
 };
 </script>
 </body>
 </html>
+
 

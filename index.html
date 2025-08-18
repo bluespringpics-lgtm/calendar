@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>내 캘린더 – 조회 공개 / 편집 비밀번호</title>
+
+<link rel="stylesheet" href="https://unpkg.com/fullcalendar@6.1.15/index.global.min.css">
+<script src="https://unpkg.com/fullcalendar@6.1.15/index.global.min.js" defer></script>
+<script src="https://unpkg.com/fullcalendar@6.1.15/locales-all.global.min.js" defer></script>
+
+<style>
+  :root{--line:#e5e7eb;--fg:#111827;--muted:#6b7280;--bg:#ffffff;--btnbg:#fff}
+  .dark:root{--line:#374151;--fg:#e5e7eb;--muted:#9ca3af;--bg:#111827;--btnbg:#111827}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Pretendard,sans-serif;color:var(--fg);background:var(--bg)}
+  header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:12px 12px;border-bottom:1px solid var(--line)}
+  h1{margin:0 8px 0 0;font-size:18px}
+  .btn{padding:8px 12px;border:1px solid var(--line);background:var(--btnbg);border-radius:10px;cursor:pointer;color:var(--fg)}
+  .btn.primary{background:#111;color:#fff;border-color:#111}
+  .btn.danger{border-color:#ef4444;color:#ef4444;background:var(--btnbg)}
+  .search{display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:var(--btnbg)}
+  .search input{border:none;outline:none;background:transparent;color:var(--fg);min-width:220px}
+  .wrap{max-width:1100px;margin:14px auto;padding:0 12px}
+  .hint{font-size:12px;color:var(--muted);margin:6px 0 12px}
+  #calendar{min-height:720px}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:640px;box-shadow:0 10px 30px rgba(0,0,0,.2);overflow:hidden}
+  .dark .modal{background:#111827;color:#e5e7eb}
+  .modal header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .modal .content{padding:14px 16px}
+  .row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:180px}
+  label{display:block;font-size:12px;color:#6b7280;margin-bottom:6px}
+  input[type="text"], textarea, select, input[type="date"], input[type="checkbox"]{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:14px;color:#111}
+  textarea{min-height:90px;resize:vertical}
+  .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+  .fc-event-main{padding:2px 4px}
+  .badge{font-size:12px;padding:4px 8px;border-radius:999px;border:1px solid var(--line)}
+  .on{color:#16a34a;border-color:#16a34a}
+  .off{color:#6b7280}
+  .disabled{opacity:.6;pointer-events:none}
+  #loadError{display:none;color:#ef4444;font-size:13px;margin:8px 12px}
+
+  /* 촬영불가: 날짜칸 회색 + X */
+  .fc-daygrid-day.blocked-day{ position:relative; background:rgba(156,163,175,0.28) !important; }
+  .fc-daygrid-day.blocked-day::after{
+    content:'✕';
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:42px; font-weight:700; color:rgba(55,65,81,0.35); pointer-events:none;
+  }
+  .fc-timegrid-col.blocked-day, .fc-list-day.blocked-day{ background:rgba(156,163,175,0.18) !important; }
+</style>
+</head>
+<body>
+  <header>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <h1>내 캘린더</h1>
+      <div class="search"><input id="searchInput" type="text" placeholder="검색(예약자명/종류/상품/장소/메모)  / 를 눌러보세요"></div>
+      <span id="status" style="font-size:12px;color:#6b7280"></span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span id="editBadge" class="badge off">편집 모드: OFF</span>
+      <button class="btn" id="btnToggleEdit">편집 모드</button>
+      <button class="btn" id="btnDark">다크</button>
+      <button class="btn primary disabled" id="btnAdd">새 일정(N)</button>
+      <button class="btn" id="btnReload">새로고침</button>
+    </div>
+  </header>
+
+  <div id="loadError">FullCalendar 로딩에 실패했습니다. 잠시 후 새로고침하거나 다른 네트워크에서 접속해보세요.</div>
+
+  <div class="wrap">
+    <div class="hint">· 11:00~15:00 기본 · 24시간(분 00/30) · 표시는 <b>11-15 김OO</b> · 삭제=소프트 삭제 · 조회 누구나 / <b>편집=비번</b>.</div>
+    <div id="calendar"></div>
+  </div>
+
+  <!-- ========= 모달 ========= -->
+  <div class="modal-bg" id="modalBg">
+    <div class="modal" id="modalBox">
+      <header>
+        <strong id="modalTitle">일정</strong>
+        <div style="display:flex;gap:8px">
+          <button class="btn danger" id="btnDelete" style="display:none">삭제</button>
+          <button class="btn" id="btnClose">닫기</button>
+        </div>
+      </header>
+      <div class="content">
+        <form id="eventForm">
+          <input type="hidden" id="evId">
+
+          <div class="row">
+            <div>
+              <label>예약자명</label>
+              <input type="text" id="evTitle" placeholder="예: 김OO">
+            </div>
+
+            <div>
+              <label>종류</label>
+              <select id="evType">
+                <option value="">선택</option>
+                <option>요가프로필</option>
+                <option>요가스냅</option>
+                <option>바디프로필</option>
+                <option>개인프로필</option>
+                <option>배우프로필</option>
+                <option>개인스냅</option>
+                <option value="__custom">기타(직접 입력)</option>
+              </select>
+              <input type="text" id="evTypeCustom" placeholder="직접 입력" style="display:none;margin-top:6px">
+            </div>
+
+            <div>
+              <label>상품</label>
+              <select id="evPackage">
+                <option value="">선택</option>
+                <option>BASIC</option>
+                <option>STANDARD</option>
+                <option>DELUXE</option>
+                <option>UNITY</option>
+                <option>BUSINESS</option>
+                <option value="__custom">기타(직접 입력)</option>
+              </select>
+              <input type="text" id="evPackageCustom" placeholder="직접 입력" style="display:none;margin-top:6px">
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>장소</label>
+              <select id="evPlace">
+                <option value="">선택</option>
+                <option>마포ST</option>
+                <option>일산ST</option>
+                <option value="__custom">기타(직접 입력)</option>
+              </select>
+              <input type="text" id="evPlaceCustom" placeholder="직접 입력" style="display:none;margin-top:6px">
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;min-width:160px">
+              <input type="checkbox" id="evBlocked" style="width:auto">
+              <label for="evBlocked" style="margin:0">촬영 불가</label>
+            </div>
+          </div>
+
+          <!-- 시간(24h, 분 00/30) -->
+          <div class="row">
+            <div><label>시작 날짜</label><input type="date" id="startDate"></div>
+            <div><label>시작 시</label><select id="startHour"></select></div>
+            <div><label>시작 분</label><select id="startMin"><option value="00">00</option><option value="30">30</option></select></div>
+          </div>
+
+          <div class="row">
+            <div><label>종료 날짜</label><input type="date" id="endDate"></div>
+            <div><label>종료 시</label><select id="endHour"></select></div>
+            <div><label>종료 분</label><select id="endMin"><option value="00">00</option><option value="30">30</option></select></div>
+          </div>
+
+          <div class="row" style="flex-direction:column">
+            <div><label>메모</label><textarea id="evDesc" placeholder="상세 메모"></textarea></div>
+          </div>
+
+          <div class="actions"><button type="submit" class="btn primary" id="btnSave">저장</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ===== 설정 ===== */
+const APP_URL = "https://script.google.com/macros/s/AKfycbyoaBeyYdMwIEqAiyfH3oKgDqx0xEpSrwKip-9Ga5T_5VTreHZ3j8qCVQXUVmjSF8xc/exec";
+let EDIT_MODE=false, ADMIN_KEY_RUNTIME=null;
+
+/* ===== 편집 UI & 비번 검증 ===== */
+const editBadge=document.getElementById('editBadge');
+function updateEditUI(){ editBadge.textContent=`편집 모드: ${EDIT_MODE?'ON':'OFF'}`; editBadge.className=`badge ${EDIT_MODE?'on':'off'}`; document.getElementById('btnAdd').classList.toggle('disabled',!EDIT_MODE); }
+async function apiVerify(key){ try{ const r = await fetch(APP_URL,{ method:'POST', body: JSON.stringify({ adminKey:key, action:'verify' }) }); const j = await r.json().catch(()=>({ok:false})); return !!j.ok; }catch(_){ return false; } }
+// 새 코드 (ASCII 외 문자 제거 + 검증)
+document.getElementById('btnToggleEdit').onclick = async ()=>{
+  if(!EDIT_MODE){
+    let k = prompt('관리 비밀번호 입력 (영문/숫자 전용)');
+    if(!k) return;
+
+    // ASCII 외 문자 제거 (한글/이모지 등 제거)
+    const filtered = k.replace(/[^\x20-\x7E]/g, '');
+    if (filtered !== k) {
+      alert('비밀번호는 영문/숫자만 사용할 수 있습니다.');
+    }
+
+    if (!filtered.trim()) return;
+
+    const ok = await apiVerify(filtered.trim());
+    if(!ok){
+      alert('비밀번호가 올바르지 않습니다.');
+      EDIT_MODE=false; ADMIN_KEY_RUNTIME=null; updateEditUI(); return;
+    }
+    ADMIN_KEY_RUNTIME = filtered.trim(); EDIT_MODE = true; updateEditUI();
+  }else{
+    EDIT_MODE=false; ADMIN_KEY_RUNTIME=null; updateEditUI();
+  }
+};
+
+
+/* ===== 유틸 ===== */
+const PALETTE=["#f97316","#3b82f6","#10b981","#a855f7","#ef4444","#14b8a6","#eab308","#6366f1","#22c55e","#fb7185","#06b6d4","#84cc16"];
+const COLOR_MAP_KEY="my_calendar_type_colors_v1";
+function loadColorMap(){ try{const raw=localStorage.getItem(COLOR_MAP_KEY); return raw?JSON.parse(raw):{} }catch(_){return{}} }
+function saveColorMap(m){ localStorage.setItem(COLOR_MAP_KEY, JSON.stringify(m||{})); }
+function getColorForType(type){ const k=(type||"").trim().toLowerCase(); if(!k) return ""; const map=loadColorMap(); if(map[k]) return map[k]; const used=Object.values(map); const next=PALETTE.find(c=>!used.includes(c))||PALETTE[used.length%PALETTE.length]; map[k]=next; saveColorMap(map); return next; }
+const pad2=n=>String(n).padStart(2,"0");
+function toLocalStr(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate())+"T"+pad2(d.getHours())+":"+pad2(d.getMinutes()); }
+function parseToFormParts(iso){ if(!iso) return {date:"",hour:"11",min:"00"}; const [dt,tm]=iso.split("T"); if(!tm) return {date:dt,hour:"11",min:"00"}; const [h,m]=tm.split(":"); return {date:dt,hour:pad2(parseInt(h,10)||0),min:(m==="30"?"30":"00")}; }
+function buildDateTime(d,h,m){ if(!d) return ""; return d+"T"+pad2(+h||0)+":"+(m||"00"); }
+function defaultStartEndFrom(base){ const x=new Date(base||new Date()); x.setHours(11,0,0,0); const s=new Date(x), e=new Date(x); e.setHours(15,0,0,0); return {start:s,end:e}; }
+function maskName(name){ if(!name) return ""; const arr=[...name]; if(arr.length===1) return arr[0]; if(arr.length===2) return arr[0]+'O'; return arr[0]+'O'.repeat(arr.length-2)+arr[arr.length-1]; }
+function softColorForPlace(place){ const p = String(place||'').toLowerCase(); if (p.includes('마포'))  return 'rgba(16,185,129,0.18)'; if (p.includes('일산'))  return 'rgba(245,158,11,0.20)'; if (!p || p === '__custom') return 'rgba(250,204,21,0.20)'; return 'rgba(147,197,253,0.20)'; }
+function toLocalYMD(s){
+  if(!s) return '';
+  try{
+    const v = (s instanceof Date) ? s : new Date(String(s).replace(' ', 'T'));
+    if (isNaN(v)) { const m = String(s).match(/^(\d{4}-\d{2}-\d{2})/); return m ? m[1] : ''; }
+    return `${v.getFullYear()}-${pad2(v.getMonth()+1)}-${pad2(v.getDate())}`;
+  }catch(_){
+    const m = String(s).match(/^(\d{4}-\d{2}-\d{2})/); return m ? m[1] : '';
+  }
+}
+function addDays(dateStr, days){ const [y,m,d] = dateStr.split('-').map(n=>parseInt(n,10)); const dt = new Date(y, m-1, d); dt.setDate(dt.getDate() + (days||0)); return `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}`; }
+function hourLabel(startISO,endISO){ if(!startISO) return ''; const sh = parseInt(startISO.split('T')[1].split(':')[0],10); const eh = endISO ? parseInt(endISO.split('T')[1].split(':')[0],10) : sh; return `${pad2(sh)}-${pad2(eh)}`.replace(/^0/,''); }
+
+/* ===== 시간 옵션 ===== */
+const startHour=document.getElementById("startHour"), endHour=document.getElementById("endHour");
+function fillHour(sel){ sel.innerHTML=""; for(let h=0;h<=23;h++){ const o=document.createElement("option"); o.value=pad2(h); o.textContent=pad2(h); sel.appendChild(o);} }
+fillHour(startHour); fillHour(endHour);
+
+/* ===== 다크 모드 ===== */
+const THEME_KEY="my_html_calendar_theme";
+function applyTheme(){ const t=localStorage.getItem(THEME_KEY)||"light"; if(t==="dark") document.documentElement.classList.add("dark"); else document.documentElement.classList.remove("dark"); document.getElementById("btnDark").textContent=(t==="dark"?"라이트":"다크"); }
+document.getElementById("btnDark").onclick=()=>{ const t=localStorage.getItem(THEME_KEY)||"light"; localStorage.setItem(THEME_KEY,t==="dark"?"light":"dark"); applyTheme(); };
+
+/* ===== DOM ===== */
+const modalBg=document.getElementById("modalBg"), btnClose=document.getElementById("btnClose"), btnDelete=document.getElementById("btnDelete");
+const form=document.getElementById("eventForm"), evId=document.getElementById("evId"), evTitle=document.getElementById("evTitle");
+const evType=document.getElementById("evType"), evTypeCustom=document.getElementById("evTypeCustom");
+const evPackage=document.getElementById("evPackage"), evPackageCustom=document.getElementById("evPackageCustom");
+const evPlace=document.getElementById("evPlace"), evPlaceCustom=document.getElementById("evPlaceCustom");
+const evBlocked=document.getElementById("evBlocked"), evDesc=document.getElementById("evDesc");
+const startDate=document.getElementById("startDate"), startMin=document.getElementById("startMin"), endDate=document.getElementById("endDate"), endMin=document.getElementById("endMin");
+const statusEl=document.getElementById("status");
+
+/* 기타항목 입력칸 */
+function bindCustom(sel, inp){ const sync=()=>{ inp.style.display=(sel.value==="__custom")?"block":"none"; }; sel.addEventListener("change",sync); sync(); }
+bindCustom(evType,evTypeCustom); bindCustom(evPackage,evPackageCustom); bindCustom(evPlace,evPlaceCustom);
+function getSelectValue(sel, inp){ return (sel.value==="__custom") ? (inp.value||"").trim() : (sel.value||"").trim(); }
+
+/* 촬영불가 시 시간입력 비활성화 */
+function toggleTimeInputsByBlocked(){ const on=evBlocked.checked; [startHour,startMin,endHour,endMin].forEach(el=>{ el.disabled=on; el.style.opacity = on ? .5 : 1; }); }
+evBlocked.addEventListener('change', toggleTimeInputsByBlocked);
+
+/* ===== 상태 ===== */
+let currentEditingId=null, calendar, currentSearch="", dblTimer=null;
+let blockedDateSet = new Set(); // yyyy-mm-dd
+
+/* ===== API ===== */
+// 범위 조회(★ 핵심: start, end를 서버로 전달)
+async function apiRange(startStr, endStr, includeDeleted=false){
+  const q = new URLSearchParams({ start:startStr, end:endStr });
+  if (includeDeleted) q.set('includeDeleted','1');
+  const url = APP_URL + (APP_URL.includes('?')?'&':'?') + q.toString();
+  const r = await fetch(url);
+  return r.json();
+}
+async function apiCreate(p){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
+async function apiUpdate(p){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
+async function apiDelete(id){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
+
+/* ===== 모달 ===== */
+function openModal(mode, d={}){
+  document.getElementById("modalTitle").textContent=(mode==='create')?"일정 추가":"일정 수정";
+  const disable=!EDIT_MODE; [...document.querySelectorAll('#eventForm input, #eventForm select, #eventForm textarea')].forEach(el=>{ el.disabled=disable; });
+  btnDelete.style.display=(mode==='edit' && EDIT_MODE)?"inline-block":"none";
+  modalBg.style.display="flex";
+
+  evId.value = d.id || ""; evTitle.value = d.title || ""; evBlocked.checked=!!d.blocked; evDesc.value=d.description||"";
+  const setSel=(sel,inp,val)=>{ if(!val){ sel.value=""; inp.value=""; inp.style.display="none"; return; } const opts=[...sel.options].map(o=>o.value||o.textContent); if(opts.includes(val)){ sel.value=val; inp.value=""; inp.style.display="none"; }else{ sel.value="__custom"; inp.value=val; inp.style.display="block"; } };
+  setSel(evType, evTypeCustom, d.type||""); setSel(evPackage, evPackageCustom, d.pkg||""); setSel(evPlace, evPlaceCustom, d.place||"");
+
+  if(d.start && d.end){ const s=parseToFormParts(d.start), e=parseToFormParts(d.end); startDate.value=s.date; startHour.value=s.hour; startMin.value=s.min; endDate.value=e.date; endHour.value=e.hour; endMin.value=e.min; }
+  else { const {start,end}=defaultStartEndFrom(d.baseDate||new Date()); const ss=parseToFormParts(toLocalStr(start)), ee=parseToFormParts(toLocalStr(end)); startDate.value=ss.date; startHour.value=ss.hour; startMin.value=ss.min; endDate.value=ee.date; endHour.value=ee.hour; endMin.value=ee.min; }
+
+  toggleTimeInputsByBlocked();
+  currentEditingId = d.id || null;
+}
+function closeModal(){ modalBg.style.display="none"; form.reset(); currentEditingId=null; }
+btnClose.onclick=closeModal;
+
+/* ===== 초기화 ===== */
+function safeInit(){
+  applyTheme(); updateEditUI();
+  if(!(window.FullCalendar && FullCalendar.Calendar)){ document.getElementById('loadError').style.display='block'; return; }
+
+  calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+    timeZone:'local',
+    initialView:'dayGridMonth',
+    headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay,listWeek'},
+    locale:'ko', selectable:true, editable:true, nowIndicator:true,
+
+    dayCellClassNames: (arg)=>{
+      const ds = `${arg.date.getFullYear()}-${pad2(arg.date.getMonth()+1)}-${pad2(arg.date.getDate())}`;
+      return blockedDateSet.has(ds) ? ['blocked-day'] : [];
+    },
+
+    /* 드래그 선택 → 촬영불가 범위 겹치면 추가 금지 */
+    select: (info)=>{
+      if(!EDIT_MODE) return;
+      const startY = toLocalYMD(info.start);
+      const endY   = toLocalYMD(new Date(info.end.getTime()-1));
+      let cur = startY, blockedHit=false;
+      while(true){ if(blockedDateSet.has(cur)){ blockedHit=true; break; } if(cur===endY) break; cur = addDays(cur,1); }
+      if(blockedHit){ alert('촬영 불가 기간에는 새 일정을 추가할 수 없습니다.'); calendar.unselect(); return; }
+      openModal('create',{baseDate:info.start});
+    },
+
+    /* 날짜 클릭: 촬영불가면 즉시 삭제 플로우 */
+    dateClick: async (info)=>{
+      if(!EDIT_MODE) return;
+      const ymd = toLocalYMD(info.date);
+      if (blockedDateSet.has(ymd)) {
+        const targets = calendar.getEvents().filter(ev=>{
+          if (ev.display !== 'background') return false;
+          const s = toLocalYMD(ev.start);
+          const e = toLocalYMD(new Date((ev.end || ev.start).getTime() - 1));
+          return (s <= ymd && ymd <= e);
+        });
+        if (targets.length === 0) { alert('촬영 불가 블록을 찾지 못했습니다. 새로고침 후 다시 시도해주세요.'); return; }
+        if (confirm('이 날짜의 촬영 불가를 삭제할까요?')){
+          for (const ev of targets){
+            const id = (ev.id||'').replace(/_bg$/,'');
+            const r = await apiDelete(id);
+            if(!r || !r.ok){ alert('삭제 실패'); break; }
+          }
+          calendar.refetchEvents();
+        }
+        return;
+      }
+      if(dblTimer && (info.date - dblTimer < 400)){ openModal('create',{baseDate:info.date}); dblTimer=null; }
+      else { dblTimer=info.date; setTimeout(()=>dblTimer=null,450); }
+    },
+
+    /* 이벤트 클릭: 배경(촬영불가)은 곧바로 삭제만 허용 */
+    eventClick: async (info)=>{
+      const e=info.event, p=e.extendedProps||{};
+      if(e.display==='background' && p.blocked){
+        if(!EDIT_MODE) return;
+        const id = (e.id||'').replace(/_bg$/,'');
+        if(confirm('이 촬영 불가를 삭제할까요?')){
+          const r=await apiDelete(id);
+          if(!r || !r.ok){ alert('삭제 실패'); return; }
+          calendar.refetchEvents();
+        }
+        return;
+      }
+      if(!EDIT_MODE) return;
+      openModal('edit',{id:e.id,title:p.blocked?"":e.title,type:p.type||"",pkg:p.pkg||"",place:p.place||"",blocked:!!p.blocked,description:p.description||"",start:e.start?toLocalStr(e.start):"",end:e.end?toLocalStr(e.end):""});
+    },
+
+    eventDrop: async (info)=>{ if(!EDIT_MODE){ info.revert(); return; } const r=await apiUpdate({id:info.event.id, 시작일시:toLocalStr(info.event.start), 종료일시:info.event.end?toLocalStr(info.event.end):""}); if(!r.ok){ alert('이동 실패'); info.revert(); } else { statusEl.textContent='이동 저장됨'; } },
+    eventResize: async (info)=>{ if(!EDIT_MODE){ info.revert(); return; } const r=await apiUpdate({id:info.event.id, 종료일시:info.event.end?toLocalStr(info.event.end):""}); if(!r.ok){ alert('시간 변경 실패'); info.revert(); } else { statusEl.textContent='시간 변경 저장됨'; } },
+
+    eventContent: (arg)=>{
+      if(arg.event.display==='background') return;
+      const p=arg.event.extendedProps||{};
+      const s=arg.event.start?toLocalStr(arg.event.start):"";
+      const e=arg.event.end?toLocalStr(arg.event.end):s;
+      const label = hourLabel(s,e);
+      const nm = p.blocked ? '' : maskName(arg.event.title||'');
+      const box=document.createElement('div');
+      box.textContent = (label? (label+' ') : '') + nm;
+      return {domNodes:[box]};
+    },
+
+    eventDidMount: (info)=>{
+      const p = info.event.extendedProps||{};
+      if (!p.blocked && info.event.display!=='background'){
+        const el = info.el;
+        const c  = p.softColor || 'rgba(147,197,253,0.20)';
+        el.style.background = c; el.style.borderColor = 'transparent'; el.style.color = '#111';
+      }
+    },
+
+    // ★ 여기서 보이는 범위만 서버에 요청
+    events: async (fetchInfo, success, failure)=>{
+      try{
+        statusEl.textContent="불러오는 중...";
+        const j = await apiRange(fetchInfo.startStr, fetchInfo.endStr); // 범위 요청
+        if(!j.ok){ failure(); statusEl.textContent="불러오기 실패"; return; }
+
+        blockedDateSet = new Set();
+        const evs=[];
+        (j.events||[]).forEach(r=>{
+          const isBlocked = !!r['촬영불가'];
+
+          if (isBlocked){
+            let d0 = toLocalYMD(r['시작일시']) || toLocalYMD(r['종료일시']);
+            let d1 = toLocalYMD(r['종료일시']) || d0;
+            if(!d0) return;
+            if(d0 > d1){ const tmp=d0; d0=d1; d1=tmp; }
+            let cur=d0; while(true){ blockedDateSet.add(cur); if(cur===d1) break; cur = addDays(cur,1); }
+            evs.push({
+              id: r['id'] + '_bg',
+              display: 'background',
+              allDay: true,
+              start: d0,
+              end: addDays(d1, 1),
+              backgroundColor: 'rgba(156,163,175,0.35)',
+              extendedProps: { blocked:true }
+            });
+            return;
+          }
+
+          const place = r['장소']||'';
+          const soft = softColorForPlace(place);
+          evs.push({
+            id: r['id'],
+            title: r['예약자명']||'',
+            start: r['시작일시'],
+            end: r['종료일시']||null,
+            backgroundColor: 'transparent',
+            borderColor: 'transparent',
+            extendedProps:{ type:r['종류']||'', pkg:r['상품']||'', place, blocked:false, softColor:soft, description:r['메모']||'' }
+          });
+        });
+
+        success(evs);
+        calendar.rerenderDates();
+        statusEl.textContent="완료";
+      }catch(e){ console.error(e); failure(e); statusEl.textContent="오류"; }
+    }
+  });
+
+  calendar.render();
+
+  // 검색
+  const searchInput=document.getElementById("searchInput");
+  searchInput.addEventListener("input",()=>{
+    currentSearch=(searchInput.value||"").trim().toLowerCase();
+    calendar.getEvents().forEach(e=>{
+      if(e.display==='background') return;
+      const p=e.extendedProps||{};
+      const hay=(e.title+" "+(p.type||"")+" "+(p.pkg||"")+" "+(p.place||"")+" "+(p.description||"")).toLowerCase();
+      e.setProp('display', currentSearch? (hay.includes(currentSearch)?'auto':'none') : 'auto');
+    });
+  });
+
+  document.getElementById("btnAdd").onclick=()=>{ if(!EDIT_MODE) return; openModal('create',{baseDate:new Date()}); };
+  document.getElementById("btnReload").onclick=()=> calendar.refetchEvents();
+}
+window.addEventListener('load', safeInit);
+
+/* ===== 저장/삭제 ===== */
+form.addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  if(!EDIT_MODE){ alert('편집 모드를 켜세요.'); return; }
+
+  try{
+    const isEdit=!!currentEditingId;
+    let title=(evTitle.value||"").trim();
+    const type=getSelectValue(evType,evTypeCustom), pkg=getSelectValue(evPackage,evPackageCustom), place=getSelectValue(evPlace,evPlaceCustom);
+    const blocked=!!evBlocked.checked, desc=(evDesc.value||"").trim();
+
+    let sDate=startDate.value, eDate=endDate.value, sHour=startHour.value, eHour=endHour.value, sMin=startMin.value, eMin=endMin.value;
+
+    if (blocked) { const d0=sDate||eDate||toLocalYMD(new Date()); const d1=eDate||d0; sDate=d0; sHour='00'; sMin='00'; eDate=d1; eHour='23'; eMin='59'; }
+    else {
+      if(!sDate || !eDate){ const {start,end}=defaultStartEndFrom(new Date()); const ss=parseToFormParts(toLocalStr(start)), ee=parseToFormParts(toLocalStr(end)); sDate=sDate||ss.date; sHour=sHour||ss.hour; sMin=sMin||ss.min; eDate=eDate||ee.date; eHour=eHour||ee.hour; eMin=eMin||ee.min; }
+    }
+
+    const startStr=buildDateTime(sDate,sHour,sMin), endStr=buildDateTime(eDate,eHour,eMin);
+    if(blocked && !title) title="촬영불가";
+    if(!blocked && !title){ alert("예약자명을 입력해주세요."); return; }
+
+    // 최신 목록 기준 충돌 검사 (필요 범위만 가져와 비교 → 추가 네트워크도 가볍습니다)
+    const checkRange = await apiRange(startStr.slice(0,10), addDays(endStr.slice(0,10), 1)); // 넉넉히 하루 추가
+    if (!checkRange || !checkRange.ok) { alert('현재 일정 목록을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+    const overlaps = (a1,a2,b1,b2)=> (a1 < b2) && (a2 > b1);
+    const newStart = new Date(startStr), newEnd = new Date(endStr || startStr);
+    let conflictMsg = '';
+    for (const r of (checkRange.events||[])) {
+      if (isEdit && r['id'] === currentEditingId) continue;
+      const b1 = new Date(r['시작일시']), b2 = new Date(r['종료일시'] || r['시작일시']);
+      if (overlaps(newStart, newEnd, b1, b2)) {
+        if (r['촬영불가'] || blocked) conflictMsg = '촬영 불가 기간과 겹칩니다. 다른 날짜/시간을 선택하세요.';
+        else conflictMsg = '이미 해당 시간에 다른 일정이 있습니다. 겹치지 않도록 변경해주세요.';
+        break;
+      }
+    }
+    if (conflictMsg) { alert(conflictMsg); return; }
+
+    const color=blocked?"":(getColorForType(type)||"");
+    const payload={ id:isEdit?currentEditingId:undefined, 예약자명:title, 종류:type, 상품:pkg, 장소:place, 시작일시:startStr, 종료일시:endStr, 색상:color, 촬영불가:blocked, 메모:desc };
+
+    statusEl.textContent = "저장 중...";
+    const r=isEdit? await apiUpdate(payload): await apiCreate(payload);
+    if(!r || !r.ok){ alert("저장 실패"); statusEl.textContent = "저장 실패"; return; }
+
+    closeModal(); calendar.refetchEvents();
+    statusEl.textContent = "저장 완료";
+  }catch(err){ console.error(err); alert("저장 중 예기치 않은 오류: " + String(err)); statusEl.textContent = "오류"; }
+});
+
+btnDelete.onclick=async()=>{ if(!EDIT_MODE || !currentEditingId) return; if(!confirm("정말 삭제할까요? (시트의 ‘삭제’ 열에 표기됩니다)")) return; const r=await apiDelete(currentEditingId); if(!r.ok){ alert("삭제 실패"); return; } closeModal(); calendar.refetchEvents(); };
+</script>
+</body>
+</html>

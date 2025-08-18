@@ -419,8 +419,10 @@ function safeInit(){
           for (const ev of targets){
             const id = (ev.id||'').replace(/_bg$/,'');
             const r = await apiDelete(id);
-            if(!r || !r.ok){ alert('삭제 실패'); break; }
-          }
+            if(!r || !r.ok){
+              alert('삭제 실패: ' + (r?.error || 'UNKNOWN'));  // ← 정확한 이유 표시
+              break;
+            }
           calendar.refetchEvents();
         }
         return;
@@ -619,6 +621,7 @@ btnDelete.onclick = async ()=>{
 </script>
 </body>
 </html>
+
 
 
 

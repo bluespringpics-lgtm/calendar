@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>청춘낙서 예약현황</title>
+<title>내 캘린더 – 조회 공개 / 편집 비밀번호</title>
 
 <link rel="stylesheet" href="https://unpkg.com/fullcalendar@6.1.15/index.global.min.css">
 <script src="https://unpkg.com/fullcalendar@6.1.15/index.global.min.js" defer></script>
@@ -51,24 +51,23 @@
   .fc-timegrid-col.blocked-day, .fc-list-day.blocked-day{ background:rgba(156,163,175,0.18) !important; }
 
   /* 팔레트 */
-  .palette{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .swatch{width:28px;height:28px;border-radius:999px;border:1px solid var(--line);cursor:pointer;position:relative;display:inline-block}
-  .swatch[data-idx]::after{
-    content:attr(data-idx);
-    position:absolute; right:-6px; top:-6px;
-    width:16px;height:16px;border-radius:999px;
-    background:#fff;border:1px solid var(--line);
-    color:#6b7280;font-size:10px;display:flex;align-items:center;justify-content:center;
-  }
-  .swatch.selected{outline:2px solid #111}
+  .palette{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .swatch{width:32px;height:32px;border-radius:999px;border:2px solid var(--line);cursor:pointer;position:relative;display:inline-block;transition:transform .08s ease, box-shadow .08s ease}
+  .swatch:hover{transform:scale(1.06)}
+  .swatch.selected{outline:3px solid #111; box-shadow:0 0 0 3px rgba(17,17,17,.12); transform:scale(1.12)}
+  .dark .swatch.selected{outline-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.12)}
+  .swatch .tick{position:absolute; right:-6px; top:-6px; width:18px;height:18px;border-radius:999px;background:#111;color:#fff;font-size:12px;display:none;align-items:center;justify-content:center;font-weight:700}
+  .dark .swatch .tick{background:#fff; color:#111}
+  .swatch.selected .tick{display:flex}
   .palette.disabled{opacity:.5;pointer-events:none}
+  #colorPreview{height:10px;border-radius:8px;border:1px dashed var(--line);margin-top:6px}
 </style>
 </head>
 <body>
   <header>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <h1>내 캘린더</h1>
-      <div class="search"><input id="searchInput" type="text" placeholder="검색"></div>
+      <div class="search"><input id="searchInput" type="text" placeholder="검색(예약자명/종류/상품/장소/메모)  / 를 눌러보세요"></div>
       <span id="status" style="font-size:12px;color:#6b7280"></span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -83,7 +82,7 @@
   <div id="loadError">FullCalendar 로딩에 실패했습니다. 잠시 후 새로고침하거나 다른 네트워크에서 접속해보세요.</div>
 
   <div class="wrap">
-    <div class="hint">· 편집은 관리자만 가능합니다.</div>
+    <div class="hint">· 11:00~15:00 기본 · 24시간(분 00/30) · 표시는 <b>11-15 김OO</b> · 삭제=소프트 삭제 · 조회 누구나 / <b>편집=비번</b>.</div>
     <div id="calendar"></div>
   </div>
 
@@ -161,6 +160,7 @@
             <div style="flex:1">
               <label>색상(연한색 8종) — 장소 기본값: 마포=1, 일산=2, 기타=3</label>
               <div class="palette" id="colorPalette"></div>
+              <div id="colorPreview" title="선택된 색 미리보기"></div>
             </div>
           </div>
 
@@ -188,61 +188,33 @@
 
 <script>
 /* ===== 설정 ===== */
-const APP_URL = "https://script.google.com/macros/s/AKfycbwS5gNxV_8kR7poJkh4r_PBeFVZhVKmjHp7P2RXBE_roKICkDVFfIpRJIab1b7zmJS4/exec";
+const APP_URL = "https://script.google.com/macros/s/AKfycbx5Nak4emB4D8-u9nZqru32iqPg9--GIfCADo1NVQB6FAO_lY8nARQY-IeUK6uB1Qw/exec";
 let EDIT_MODE=false, ADMIN_KEY_RUNTIME=null;
 
 /* ===== 편집 UI & 비번 검증 ===== */
 const editBadge=document.getElementById('editBadge');
-function updateEditUI(){
-  editBadge.textContent=`편집 모드: ${EDIT_MODE?'ON':'OFF'}`;
-  editBadge.className=`badge ${EDIT_MODE?'on':'off'}`;
-  document.getElementById('btnAdd').classList.toggle('disabled',!EDIT_MODE);
-}
-
-// 견고한 검증: POST(JSON) → 실패 시 GET 폴백(+캐시버스트)
+function updateEditUI(){ editBadge.textContent=`편집 모드: ${EDIT_MODE?'ON':'OFF'}`; editBadge.className=`badge ${EDIT_MODE?'on':'off'}`; document.getElementById('btnAdd').classList.toggle('disabled',!EDIT_MODE); }
 async function apiVerify(key){
-  const payload = { adminKey:key, action:'verify' };
+  // POST 우선, 실패시 GET 폴백(배포 환경 이슈 대비)
   try{
-    const r = await fetch(APP_URL,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const text = await r.text();
-    try{
-      const j = JSON.parse(text);
-      return !!j.ok;
-    }catch(_){
-      const u = APP_URL + (APP_URL.includes('?')?'&':'?')
-        + 'action=verify&adminKey=' + encodeURIComponent(key) + '&_t=' + Date.now();
-      const r2 = await fetch(u);
-      const j2 = await r2.json().catch(()=>({ok:false}));
-      return !!j2.ok;
-    }
-  }catch(_e){
-    try{
-      const u = APP_URL + (APP_URL.includes('?')?'&':'?')
-        + 'action=verify&adminKey=' + encodeURIComponent(key) + '&_t=' + Date.now();
-      const r2 = await fetch(u);
-      const j2 = await r2.json().catch(()=>({ok:false}));
-      return !!j2.ok;
-    }catch(__){ return false; }
-  }
+    const r = await fetch(APP_URL,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ adminKey:key, action:'verify' }) });
+    const t = await r.text();
+    try{ const j = JSON.parse(t); return !!j.ok; }catch(_){}
+  }catch(_){}
+  try{
+    const u = APP_URL + (APP_URL.includes('?')?'&':'?') + 'action=verify&adminKey=' + encodeURIComponent(key) + '&_t=' + Date.now();
+    const r2 = await fetch(u); const j2 = await r2.json().catch(()=>({ok:false})); return !!j2.ok;
+  }catch(_){ return false; }
 }
-
-// ASCII 외 입력 제거(prompt)
 document.getElementById('btnToggleEdit').onclick = async ()=>{
   if(!EDIT_MODE){
     let k = prompt('관리 비밀번호 입력 (영문/숫자 전용)');
     if(!k) return;
-    const filtered = k.replace(/[^\x20-\x7E]/g, '');
-    if (!filtered.trim()) return;
-    const ok = await apiVerify(filtered.trim());
-    if(!ok){
-      alert('비밀번호가 올바르지 않거나 서버 응답 오류입니다.');
-      EDIT_MODE=false; ADMIN_KEY_RUNTIME=null; updateEditUI(); return;
-    }
-    ADMIN_KEY_RUNTIME = filtered.trim(); EDIT_MODE = true; updateEditUI();
+    const filtered = k.replace(/[^\x20-\x7E]/g, '').trim();
+    if (!filtered) return;
+    const ok = await apiVerify(filtered);
+    if(!ok){ alert('비밀번호가 올바르지 않거나 서버 응답 오류입니다.'); EDIT_MODE=false; ADMIN_KEY_RUNTIME=null; updateEditUI(); return; }
+    ADMIN_KEY_RUNTIME = filtered; EDIT_MODE = true; updateEditUI();
   }else{
     EDIT_MODE=false; ADMIN_KEY_RUNTIME=null; updateEditUI();
   }
@@ -268,37 +240,59 @@ function toLocalYMD(s){
 function addDays(dateStr, days){ const [y,m,d] = dateStr.split('-').map(n=>parseInt(n,10)); const dt = new Date(y, m-1, d); dt.setDate(dt.getDate() + (days||0)); return `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}`; }
 function hourLabel(startISO,endISO){ if(!startISO) return ''; const sh = parseInt(startISO.split('T')[1].split(':')[0],10); const eh = endISO ? parseInt(endISO.split('T')[1].split(':')[0],10) : sh; return `${pad2(sh)}-${pad2(eh)}`.replace(/^0/,''); }
 
-/* ===== 팔레트 ===== */
+/* ===== 팔레트(연한색 8종) ===== */
 const PALETTE = [
-  'rgba(16,185,129,0.18)','rgba(245,158,11,0.20)','rgba(250,204,21,0.20)','rgba(96,165,250,0.20)',
-  'rgba(244,114,182,0.20)','rgba(167,139,250,0.20)','rgba(34,197,94,0.18)','rgba(20,184,166,0.20)'
+  'rgba(16,185,129,0.18)',  // 1 마포 기본(연초록)
+  'rgba(245,158,11,0.20)',  // 2 일산 기본(연주황)
+  'rgba(250,204,21,0.20)',  // 3 기타 기본(연노랑)
+  'rgba(96,165,250,0.20)',  // 4 연파랑
+  'rgba(244,114,182,0.20)', // 5 연핑크
+  'rgba(167,139,250,0.20)', // 6 연보라
+  'rgba(34,197,94,0.18)',   // 7 연초록2
+  'rgba(20,184,166,0.20)'   // 8 연청록
 ];
 const colorPaletteEl = document.getElementById('colorPalette');
 const evColor = document.getElementById('evColor');
-let manualColor = false;
-function renderPalette(selected){
+const colorPreview = document.getElementById('colorPreview');
+let manualColor = false; // 사용자가 직접 클릭했는지
+let selectedColorIdx = null; // 1..8
+
+function renderPalette(selectedIdx){
   colorPaletteEl.innerHTML = '';
   PALETTE.forEach((c,idx)=>{
-    const sw = document.createElement('div');
-    sw.className = 'swatch' + (c===selected ? ' selected':'');
-    sw.style.background = c; sw.dataset.idx = String(idx+1);
-    sw.title = `${idx+1}번 컬러`;
-    sw.onclick = ()=>{ selectColor(c, true); };
+    const i = idx+1;
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'swatch' + (i===selectedIdx ? ' selected':'');
+    sw.style.backgroundColor = c;
+    sw.dataset.idx = String(i);
+    sw.title = `${i}번 컬러`;
+    const tick = document.createElement('div');
+    tick.className = 'tick';
+    tick.textContent = '✓';
+    sw.appendChild(tick);
+    sw.onclick = ()=> selectColor(i, true);
     colorPaletteEl.appendChild(sw);
   });
 }
-function selectColor(c, byUser=false){
-  evColor.value = c || '';
+
+function selectColor(idx, byUser=false){
+  selectedColorIdx = idx;
+  const color = PALETTE[idx-1] || '';
+  evColor.value = color;
+  colorPreview.style.backgroundColor = color || 'transparent';
   if (byUser) manualColor = true;
+  // 토글: 인덱스 비교(문자열 비교 대신)
   [...colorPaletteEl.querySelectorAll('.swatch')].forEach(el=>{
-    el.classList.toggle('selected', el.style.background === c);
+    el.classList.toggle('selected', Number(el.dataset.idx)===idx);
   });
 }
-function defaultColorForPlace(place){
+/* 장소→기본색: 마포=1, 일산=2, 그 외=3 */
+function defaultColorIndexForPlace(place){
   const p = String(place||'').toLowerCase();
-  if (p.includes('마포'))  return PALETTE[0];
-  if (p.includes('일산'))  return PALETTE[1];
-  return PALETTE[2];
+  if (p.includes('마포'))  return 1;
+  if (p.includes('일산'))  return 2;
+  return 3; // 기타/빈값/__custom
 }
 
 /* ===== 시간 옵션 ===== */
@@ -334,11 +328,11 @@ function toggleTimeInputsByBlocked(){
 }
 evBlocked.addEventListener('change', toggleTimeInputsByBlocked);
 
-/* 장소 변경 → 기본색 자동 선택(직접선택 전까지만) */
+/* 장소 변경 → 기본색 자동 선택(사용자가 아직 직접 선택 안 했을 때만) */
 evPlace.addEventListener('change', ()=>{
   if (manualColor) return;
   const place = getSelectValue(evPlace, evPlaceCustom);
-  selectColor(defaultColorForPlace(place));
+  selectColor(defaultColorIndexForPlace(place), false);
 });
 
 /* ===== 상태 ===== */
@@ -346,50 +340,25 @@ let currentEditingId=null, calendar, currentSearch="", dblTimer=null;
 let blockedDateSet = new Set(); // yyyy-mm-dd
 
 /* ===== API ===== */
-function addCacheBust(url){ return url + (url.includes('?')?'&':'?') + '_t=' + Date.now(); }
-
-async function apiRange(startStr, endStr, includeDeleted=false){
+function addCacheBust(url){
+  return url + (url.includes('?')?'&':'?') + '_t=' + Date.now();
+}
+async function apiRange(startStr, endStr, includeDeleted=false, thin=true){
   const q = new URLSearchParams({ start:startStr, end:endStr });
   if (includeDeleted) q.set('includeDeleted','1');
+  if (thin) q.set('thin','1'); // 속도 가벼움
   const url = addCacheBust(APP_URL + (APP_URL.includes('?')?'&':'?') + q.toString());
   const r = await fetch(url);
   return r.json();
 }
-async function apiCreate(p){
-  if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
-  try{
-    const r=await fetch(addCacheBust(APP_URL),{
-      method:'POST',
-      body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})
-    });
-    return await r.json();
-  }catch(e){return {ok:false,error:'NETWORK'};}
-}
-async function apiUpdate(p){
-  if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
-  try{
-    const r=await fetch(addCacheBust(APP_URL),{
-      method:'POST',
-      body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})
-    });
-    return await r.json();
-  }catch(e){return {ok:false,error:'NETWORK'};}
-}
-async function apiDelete(id){
-  if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
-  try{
-    const r=await fetch(addCacheBust(APP_URL),{
-      method:'POST',
-      body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})
-    });
-    return await r.json();
-  }catch(e){return {ok:false,error:'NETWORK'};}
-}
+async function apiCreate(p){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(addCacheBust(APP_URL),{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
+async function apiUpdate(p){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(addCacheBust(APP_URL),{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
+async function apiDelete(id){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(addCacheBust(APP_URL),{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
 
 /* ===== 모달 ===== */
 function openModal(mode, d={}){
   document.getElementById("modalTitle").textContent=(mode==='create')?"일정 추가":"일정 수정";
-  const disable=!EDIT_MODE; [...document.querySelectorAll('#eventForm input, #eventForm select, #eventForm textarea')].forEach(el=>{ el.disabled=disable; });
+  const disable=!EDIT_MODE; [...document.querySelectorAll('#eventForm input, #eventForm select, #eventForm textarea, #eventForm button.swatch')].forEach(el=>{ el.disabled=disable; });
   btnDelete.style.display=(mode==='edit' && EDIT_MODE)?"inline-block":"none";
   modalBg.style.display="flex";
 
@@ -421,21 +390,23 @@ function openModal(mode, d={}){
     endDate.value=ee.date;   endHour.value=ee.hour;   endMin.value=ee.min;
   }
 
-  // 팔레트
+  // 팔레트: 생성 모드면 장소 기본색, 수정 모드면 저장된 색
   manualColor = false;
-  renderPalette(null);
-  if (mode==='edit' && d.color){
-    selectColor(d.color, true);
-  } else {
-    const def = defaultColorForPlace(getSelectValue(evPlace, evPlaceCustom));
-    selectColor(def, false);
-  }
+  const initIdx = (()=>{
+    if (mode==='edit' && d.color){
+      const i = PALETTE.findIndex(x => x.replace(/\s+/g,'') === (d.color||'').replace(/\s+/g,'')) + 1;
+      return i || defaultColorIndexForPlace(getSelectValue(evPlace, evPlaceCustom));
+    }
+    return defaultColorIndexForPlace(getSelectValue(evPlace, evPlaceCustom));
+  })();
+  renderPalette(initIdx);
+  selectColor(initIdx, mode==='edit' && !!d.color); // 수정모드 컬러 있으면 byUser로 취급
 
   toggleTimeInputsByBlocked();
   currentEditingId = d.id || null;
 }
-function closeModal(){ modalBg.style.display="none"; form.reset(); currentEditingId=null; }
-btnClose.onclick=closeModal;
+function closeModal(){ modalBg.style.display="none"; form.reset(); currentEditingId=null; selectedColorIdx=null; manualColor=false; colorPreview.style.backgroundColor='transparent'; }
+document.getElementById("btnClose").onclick=closeModal;
 
 /* ===== 초기화 ===== */
 function safeInit(){
@@ -478,10 +449,7 @@ function safeInit(){
           for (const ev of targets){
             const id = (ev.id||'').replace(/_bg$/,'');
             const r = await apiDelete(id);
-            if(!r || !r.ok){
-              alert('삭제 실패: ' + (r?.error || 'UNKNOWN'));
-              break;
-            }
+            if(!r || !r.ok){ alert('삭제 실패: ' + (r?.error || 'UNKNOWN')); break; }
           }
           calendar.refetchEvents();
         }
@@ -498,10 +466,7 @@ function safeInit(){
         const id = (e.id||'').replace(/_bg$/,'');
         if(confirm('이 촬영 불가를 삭제할까요?')){
           const r = await apiDelete(id);
-          if(!r || !r.ok){
-            alert('삭제 실패: ' + (r?.error || 'UNKNOWN'));
-            return;
-          }
+          if(!r || !r.ok){ alert('삭제 실패: ' + (r?.error || 'UNKNOWN')); return; }
           calendar.refetchEvents();
         }
         return;
@@ -535,16 +500,19 @@ function safeInit(){
       const p = info.event.extendedProps||{};
       if (!p.blocked && info.event.display!=='background'){
         const el = info.el;
-        const c  = p.color || defaultColorForPlace(p.place);
-        el.style.background = c; el.style.borderColor = 'transparent'; el.style.color = '#111';
+        const c  = p.color || (p.place ? (['','rgba(16,185,129,0.18)','rgba(245,158,11,0.20)','rgba(250,204,21,0.20)'][ defaultColorIndexForPlace(p.place) ] ) : 'rgba(250,204,21,0.20)');
+        // 명시적으로 색 지정
+        el.style.backgroundColor = c;
+        el.style.borderColor = c;
+        el.style.color = '#111';
       }
     },
 
-    // 범위 이벤트 로더
+    // 범위만 가져오기(thin=1)
     events: async (fetchInfo, success, failure)=>{
       try{
         statusEl.textContent="불러오는 중...";
-        const j = await apiRange(fetchInfo.startStr, fetchInfo.endStr);
+        const j = await apiRange(fetchInfo.startStr, fetchInfo.endStr, false, true);
         if(!j.ok){ failure(); statusEl.textContent="불러오기 실패"; return; }
 
         blockedDateSet = new Set();
@@ -582,7 +550,7 @@ function safeInit(){
               place:r['장소']||'',
               blocked:false,
               color:r['색상']||'',
-              description:r['메모']||''
+              description:'' // thin 응답에선 메모 제외
             }
           });
         });
@@ -609,6 +577,12 @@ function safeInit(){
 
   document.getElementById("btnAdd").onclick=()=>{ if(!EDIT_MODE) return; openModal('create',{baseDate:new Date()}); };
   document.getElementById("btnReload").onclick=()=> calendar.refetchEvents();
+
+  // 모달이 열려 있을 때 숫자 1~8로 색상 선택 단축키
+  document.addEventListener('keydown',(ev)=>{
+    if (modalBg.style.display!=='flex') return;
+    if (ev.key>='1' && ev.key<='8'){ selectColor(Number(ev.key), true); }
+  });
 }
 window.addEventListener('load', safeInit);
 
@@ -627,19 +601,15 @@ form.addEventListener("submit", async (e)=>{
 
     if (blocked) { const d0=sDate||eDate||toLocalYMD(new Date()); const d1=eDate||d0; sDate=d0; sHour='00'; sMin='00'; eDate=d1; eHour='23'; eMin='59'; }
     else {
-      if(!sDate || !eDate){
-        const {start,end}=defaultStartEndFrom(new Date());
-        const ss=parseToFormParts(toLocalStr(start)), ee=parseToFormParts(toLocalStr(end));
-        sDate=sDate||ss.date; sHour=sHour||ss.hour; sMin=sMin||ss.min; eDate=eDate||ee.date; eHour=eHour||ee.hour; eMin=eMin||ee.min;
-      }
+      if(!sDate || !eDate){ const {start,end}=defaultStartEndFrom(new Date()); const ss=parseToFormParts(toLocalStr(start)), ee=parseToFormParts(toLocalStr(end)); sDate=sDate||ss.date; sHour=sHour||ss.hour; sMin=sMin||ss.min; eDate=eDate||ee.date; eHour=eHour||ee.hour; eMin=eMin||ee.min; }
     }
 
     const startStr=buildDateTime(sDate,sHour,sMin), endStr=buildDateTime(eDate,eHour,eMin);
     if(blocked && !title) title="촬영불가";
     if(!blocked && !title){ alert("예약자명을 입력해주세요."); return; }
 
-    // 충돌 검사(보이는 범위 기준)
-    const checkRange = await apiRange(startStr.slice(0,10), addDays(endStr.slice(0,10), 1));
+    // 충돌 검사(thin=1로 충분)
+    const checkRange = await apiRange(startStr.slice(0,10), addDays(endStr.slice(0,10), 1), false, true);
     if (!checkRange || !checkRange.ok) { alert('현재 일정 목록을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
     const overlaps = (a1,a2,b1,b2)=> (a1 < b2) && (a2 > b1);
     const newStart = new Date(startStr), newEnd = new Date(endStr || startStr);
@@ -655,8 +625,8 @@ form.addEventListener("submit", async (e)=>{
     }
     if (conflictMsg) { alert(conflictMsg); return; }
 
-    // 색상
-    const colorFinal = evColor.value || defaultColorForPlace(place);
+    // 색상: 사용자 설정 우선, 없으면 장소 기본색
+    const colorFinal = evColor.value || PALETTE[ defaultColorIndexForPlace(place)-1 ];
 
     const payload={ id:isEdit?currentEditingId:undefined, 예약자명:title, 종류:type, 상품:pkg, 장소:place,
       시작일시:startStr, 종료일시:endStr, 색상:colorFinal, 촬영불가:blocked, 메모:desc };
@@ -683,5 +653,3 @@ btnDelete.onclick = async ()=>{
 </script>
 </body>
 </html>
-
-

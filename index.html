@@ -25,6 +25,7 @@
   .hint{font-size:12px;color:var(--muted);margin:6px 0 12px}
   #calendar{min-height:720px}
   #loadError{display:none;color:#ef4444;font-size:13px;margin:8px 12px}
+
   .badge{font-size:12px;padding:4px 8px;border-radius:999px;border:1px solid var(--line)}
   .on{color:#16a34a;border-color:#16a34a}
   .off{color:#6b7280}
@@ -102,14 +103,13 @@
       <div class="content">
         <form id="eventForm">
           <input type="hidden" id="evId">
-          <input type="hidden" id="evColor"> <!-- 선택된 색상 코드 저장 -->
+          <input type="hidden" id="evColor">
 
           <div class="row">
             <div>
               <label>예약자명</label>
               <input type="text" id="evTitle" placeholder="예: 김OO">
             </div>
-
             <div>
               <label>종류</label>
               <select id="evType">
@@ -124,7 +124,6 @@
               </select>
               <input type="text" id="evTypeCustom" placeholder="직접 입력" style="display:none;margin-top:6px">
             </div>
-
             <div>
               <label>상품</label>
               <select id="evPackage">
@@ -166,7 +165,7 @@
             </div>
           </div>
 
-          <!-- 시간(24h, 분 00/30) -->
+          <!-- 시간 -->
           <div class="row">
             <div><label>시작 날짜</label><input type="date" id="startDate"></div>
             <div><label>시작 시</label><select id="startHour"></select></div>
@@ -202,7 +201,11 @@ function updateEditUI(){
 }
 async function apiVerify(key){
   try{
-    const r = await fetch(APP_URL,{ method:'POST', body: JSON.stringify({ adminKey:key, action:'verify' }) });
+    const r = await fetch(APP_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ adminKey:key, action:'verify' })
+    });
     const j = await r.json().catch(()=>({ok:false}));
     return !!j.ok;
   }catch(_){ return false; }
@@ -243,14 +246,8 @@ function hourLabel(startISO,endISO){ if(!startISO) return ''; const sh = parseIn
 
 /* ===== 팔레트(연한색 8종) ===== */
 const PALETTE = [
-  'rgba(16,185,129,0.18)',  // 1 마포 기본(연초록)
-  'rgba(245,158,11,0.20)',  // 2 일산 기본(연주황)
-  'rgba(250,204,21,0.20)',  // 3 기타 기본(연노랑)
-  'rgba(96,165,250,0.20)',  // 4 연파랑
-  'rgba(244,114,182,0.20)', // 5 연핑크
-  'rgba(167,139,250,0.20)', // 6 연보라
-  'rgba(34,197,94,0.18)',   // 7 연초록2
-  'rgba(20,184,166,0.20)'   // 8 연청록
+  'rgba(16,185,129,0.18)','rgba(245,158,11,0.20)','rgba(250,204,21,0.20)','rgba(96,165,250,0.20)',
+  'rgba(244,114,182,0.20)','rgba(167,139,250,0.20)','rgba(34,197,94,0.18)','rgba(20,184,166,0.20)'
 ];
 const colorPaletteEl = document.getElementById('colorPalette');
 const evColor = document.getElementById('evColor');
@@ -273,7 +270,6 @@ function selectColor(c, byUser=false){
     el.classList.toggle('selected', el.style.background === c);
   });
 }
-/* 장소→기본색 */
 function defaultColorForPlace(place){
   const p = String(place||'').toLowerCase();
   if (p.includes('마포'))  return PALETTE[0];
@@ -314,7 +310,7 @@ function toggleTimeInputsByBlocked(){
 }
 evBlocked.addEventListener('change', toggleTimeInputsByBlocked);
 
-/* 장소 변경 → 기본색 자동 선택(사용자가 아직 직접 클릭 전일 때만) */
+/* 장소 변경 → 기본색 자동 선택(직접 선택 전일 때만) */
 evPlace.addEventListener('change', ()=>{
   if (manualColor) return;
   const place = getSelectValue(evPlace, evPlaceCustom);
@@ -330,23 +326,41 @@ async function apiRange(startStr, endStr, includeDeleted=false){
   const q = new URLSearchParams({ start:startStr, end:endStr });
   if (includeDeleted) q.set('includeDeleted','1');
   const url = APP_URL + (APP_URL.includes('?')?'&':'?') + q.toString();
-  const r = await fetch(url);
-  return r.json();
+  try{
+    const r = await fetch(url, { method:'GET', headers:{'Accept':'application/json'} });
+    const ct = (r.headers.get('content-type')||'').toLowerCase();
+    if(!r.ok){
+      return {ok:false, error:'HTTP_'+r.status};
+    }
+    if(!ct.includes('application/json')){
+      const body = await r.text();
+      return {ok:false, error:'NON_JSON', body: body.slice(0,500)};
+    }
+    return await r.json();
+  }catch(e){
+    return {ok:false, error:'NETWORK', detail:String(e)};
+  }
 }
 async function apiCreate(p){
   if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
-  try{ const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})}); return await r.json(); }
-  catch(e){return {ok:false,error:'NETWORK'};}
+  try{
+    const r=await fetch(APP_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})});
+    return await r.json();
+  }catch(e){return {ok:false,error:'NETWORK'};}
 }
 async function apiUpdate(p){
   if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
-  try{ const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})}); return await r.json(); }
-  catch(e){return {ok:false,error:'NETWORK'};}
+  try{
+    const r=await fetch(APP_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})});
+    return await r.json();
+  }catch(e){return {ok:false,error:'NETWORK'};}
 }
 async function apiDelete(id){
   if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
-  try{ const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})}); return await r.json(); }
-  catch(e){return {ok:false,error:'NETWORK'};}
+  try{
+    const r=await fetch(APP_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})});
+    return await r.json();
+  }catch(e){return {ok:false,error:'NETWORK'};}
 }
 
 /* ===== 모달 ===== */
@@ -361,7 +375,6 @@ function openModal(mode, d={}){
   evBlocked.checked=!!d.blocked;
   evDesc.value=d.description||"";
 
-  // select들 설정
   const setSel=(sel,inp,val)=>{
     if(!val){ sel.value=""; inp.value=""; inp.style.display="none"; return; }
     const opts=[...sel.options].map(o=>o.value||o.textContent);
@@ -372,7 +385,6 @@ function openModal(mode, d={}){
   setSel(evPackage, evPackageCustom, d.pkg||"");
   setSel(evPlace, evPlaceCustom, d.place||"");
 
-  // 시간
   if(d.start && d.end){
     const s=parseToFormParts(d.start), e=parseToFormParts(d.end);
     startDate.value=s.date; startHour.value=s.hour; startMin.value=s.min;
@@ -384,12 +396,10 @@ function openModal(mode, d={}){
     endDate.value=ee.date;   endHour.value=ee.hour;   endMin.value=ee.min;
   }
 
-  // 팔레트: 생성 모드면 장소 기본색, 수정 모드면 저장된 색
   manualColor = false;
   renderPalette(null);
   if (mode==='edit' && d.color){
-    selectColor(d.color);
-    manualColor = true;
+    selectColor(d.color); manualColor = true;
   } else {
     const def = defaultColorForPlace(getSelectValue(evPlace, evPlaceCustom));
     selectColor(def);
@@ -422,10 +432,7 @@ function safeInit(){
       const startY = toLocalYMD(info.start);
       const endY   = toLocalYMD(new Date(info.end.getTime()-1));
       let cur = startY, blockedHit=false;
-      while(true){
-        if(blockedDateSet.has(cur)){ blockedHit=true; break; }
-        if(cur===endY) break; cur = addDays(cur,1);
-      }
+      while(true){ if(blockedDateSet.has(cur)){ blockedHit=true; break; } if(cur===endY) break; cur = addDays(cur,1); }
       if(blockedHit){ alert('촬영 불가 기간에는 새 일정을 추가할 수 없습니다.'); calendar.unselect(); return; }
       openModal('create',{baseDate:info.start});
     },
@@ -445,10 +452,7 @@ function safeInit(){
           for (const ev of targets){
             const id = (ev.id||'').replace(/_bg$/,'');
             const r = await apiDelete(id);
-            if(!r || !r.ok){
-              alert('삭제 실패: ' + (r?.error || 'UNKNOWN'));
-              break;
-            }
+            if(!r || !r.ok){ alert('삭제 실패: ' + (r?.error || 'UNKNOWN')); break; }
           }
           calendar.refetchEvents();
         }
@@ -460,21 +464,16 @@ function safeInit(){
 
     eventClick: async (info)=>{
       const e=info.event, p=e.extendedProps||{};
-      // 배경(촬영불가) 클릭 → 삭제
       if(e.display==='background' && p.blocked){
         if(!EDIT_MODE) return;
         const id = (e.id||'').replace(/_bg$/,'');
         if(confirm('이 촬영 불가를 삭제할까요?')){
           const r = await apiDelete(id);
-          if(!r || !r.ok){
-            alert('삭제 실패: ' + (r?.error || 'UNKNOWN'));
-            return;
-          }
+          if(!r || !r.ok){ alert('삭제 실패: ' + (r?.error || 'UNKNOWN')); return; }
           calendar.refetchEvents();
         }
         return;
       }
-
       if(!EDIT_MODE) return;
       openModal('edit',{
         id:e.id, title:p.blocked?"":e.title, type:p.type||"", pkg:p.pkg||"",
@@ -516,20 +515,32 @@ function safeInit(){
       }
     },
 
-    // ====== 이벤트 로딩(여기를 중요 수정) ======
+    /* ===== 이벤트 로딩 (여기서 에러 원인 친절히 보여줌) ===== */
     events: async (fetchInfo, success, failure)=>{
       try{
         statusEl.textContent="불러오는 중...";
         const j = await apiRange(fetchInfo.startStr, fetchInfo.endStr);
-        if(!j.ok){ failure(); statusEl.textContent="불러오기 실패"; return; }
+        if(!j || !j.ok){
+          let tip = '';
+          if (j && j.error === 'NON_JSON') {
+            tip = ' (로그인/권한 페이지가 반환됨 → Apps Script 배포 접근 권한을 "Anyone"으로 설정하세요)';
+          } else if (j && j.error && j.error.startsWith('HTTP_')) {
+            tip = ' (HTTP 오류: ' + j.error.replace('HTTP_','') + ')';
+          } else if (j && j.error === 'NETWORK') {
+            tip = ' (네트워크 문제)';
+          }
+          document.getElementById('loadError').style.display='block';
+          document.getElementById('loadError').textContent = 'API 오류: ' + (j? j.error : 'UNKNOWN') + tip;
+          failure();
+          statusEl.textContent="불러오기 실패";
+          return;
+        }
 
         blockedDateSet = new Set();
         const evs=[];
         (j.events||[]).forEach(r=>{
           const isBlocked = !!r['촬영불가'];
-
           if (isBlocked){
-            // 촬영불가: 달력 배경 블록 + blockedDateSet 채우기
             let d0 = toLocalYMD(r['시작일시']) || toLocalYMD(r['종료일시']);
             let d1 = toLocalYMD(r['종료일시']) || d0;
             if(!d0) return;
@@ -539,7 +550,7 @@ function safeInit(){
               id: r['id'] + '_bg',
               display: 'background',
               allDay: true,
-              start: d0,                 // allDay 배경은 yyyy-mm-dd로 OK
+              start: d0,
               end: addDays(d1, 1),
               backgroundColor: 'rgba(156,163,175,0.35)',
               extendedProps: { blocked:true }
@@ -547,7 +558,6 @@ function safeInit(){
             return;
           }
 
-          // ✅ 일반 일정: Date 객체로 전달
           const startVal = r['시작일시'] ? new Date(r['시작일시']) : null;
           const endVal   = r['종료일시'] ? new Date(r['종료일시']) : null;
 
@@ -574,6 +584,8 @@ function safeInit(){
         statusEl.textContent="완료";
       }catch(e){
         console.error(e);
+        document.getElementById('loadError').style.display='block';
+        document.getElementById('loadError').textContent = '예외 오류: ' + String(e);
         failure(e);
         statusEl.textContent="오류";
       }
@@ -594,14 +606,10 @@ function safeInit(){
     });
   });
 
-  // 단축키: / 포커스, N 새 일정
+  // 단축키
   window.addEventListener('keydown', (ev)=>{
-    if (ev.key === '/' && document.activeElement !== searchInput){
-      ev.preventDefault(); searchInput.focus(); return;
-    }
-    if (ev.key.toLowerCase() === 'n' && EDIT_MODE){
-      ev.preventDefault(); openModal('create',{baseDate:new Date()});
-    }
+    if (ev.key === '/' && document.activeElement !== searchInput){ ev.preventDefault(); searchInput.focus(); }
+    if (ev.key.toLowerCase() === 'n' && EDIT_MODE){ ev.preventDefault(); openModal('create',{baseDate:new Date()}); }
     if (ev.key === 'Escape' && modalBg.style.display==='flex'){ closeModal(); }
   });
 
@@ -637,7 +645,7 @@ form.addEventListener("submit", async (e)=>{
     if(blocked && !title) title="촬영불가";
     if(!blocked && !title){ alert("예약자명을 입력해주세요."); return; }
 
-    // 충돌 검사(보이는 범위 기준)
+    // 충돌 검사
     const checkRange = await apiRange(startStr.slice(0,10), addDays(endStr.slice(0,10), 1));
     if (!checkRange || !checkRange.ok) { alert('현재 일정 목록을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
     const overlaps = (a1,a2,b1,b2)=> (a1 < b2) && (a2 > b1);
@@ -654,7 +662,6 @@ form.addEventListener("submit", async (e)=>{
     }
     if (conflictMsg) { alert(conflictMsg); return; }
 
-    // 색상: 사용자 설정 우선, 없으면 장소 기본색
     const colorFinal = evColor.value || defaultColorForPlace(place);
 
     const payload={ id:isEdit?currentEditingId:undefined, 예약자명:title, 종류:type, 상품:pkg, 장소:place,
@@ -663,7 +670,6 @@ form.addEventListener("submit", async (e)=>{
     statusEl.textContent = "저장 중...";
     const r=isEdit? await apiUpdate(payload): await apiCreate(payload);
     if(!r || !r.ok){ alert("저장 실패"); statusEl.textContent = "저장 실패"; return; }
-
     closeModal(); calendar.refetchEvents();
     statusEl.textContent = "저장 완료";
   }catch(err){ console.error(err); alert("저장 중 예기치 않은 오류: " + String(err)); statusEl.textContent = "오류"; }
@@ -673,10 +679,7 @@ btnDelete.onclick = async ()=>{
   if(!EDIT_MODE || !currentEditingId) return;
   if(!confirm("정말 삭제할까요? (시트의 ‘삭제’ 열에 표기됩니다)")) return;
   const r = await apiDelete(currentEditingId);
-  if(!r || !r.ok){
-    alert("삭제 실패: " + (r?.error || "UNKNOWN"));
-    return;
-  }
+  if(!r || !r.ok){ alert("삭제 실패: " + (r?.error || "UNKNOWN")); return; }
   closeModal(); calendar.refetchEvents();
 };
 </script>

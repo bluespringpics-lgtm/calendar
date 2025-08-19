@@ -45,12 +45,7 @@
   .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
   .fc-event-main{padding:2px 4px}
 
-  /* 촬영불가: 날짜칸 회색 + X */
-  .fc-daygrid-day.blocked-day{ position:relative; background:rgba(156,163,175,0.28) !important; }
-  .fc-daygrid-day.blocked-day::after{
-    content:'✕'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    font-size:42px; font-weight:700; color:rgba(55,65,81,0.35); pointer-events:none;
-  }
+  /* 촬영불가: 날짜칸 회색 */
   .fc-timegrid-col.blocked-day, .fc-list-day.blocked-day{ background:rgba(156,163,175,0.18) !important; }
 
   /* 팔레트 */
@@ -297,29 +292,31 @@ const evBlocked=document.getElementById("evBlocked"), evDesc=document.getElement
 const startDate=document.getElementById("startDate"), startMin=document.getElementById("startMin"), endDate=document.getElementById("endDate"), endMin=document.getElementById("endMin");
 const statusEl=document.getElementById("status");
 
-/* 기타항목 입력칸 */
-function bindCustom(sel, inp){ const sync=()=>{ inp.style.display=(sel.value==="__custom")?"block":"none"; }; sel.addEventListener("change",sync); sync(); }
-bindCustom(evType,evTypeCustom); bindCustom(evPackage,evPackageCustom); bindCustom(evPlace,evPlaceCustom);
-function getSelectValue(sel, inp){ return (sel.value==="__custom") ? (inp.value||"").trim() : (sel.value||"").trim(); }
-
-/* 촬영불가 시 시간/팔레트 비활성화 */
-function toggleTimeInputsByBlocked(){
-  const on=evBlocked.checked;
-  [startHour,startMin,endHour,endMin].forEach(el=>{ el.disabled=on; el.style.opacity = on ? .5 : 1; });
-  document.getElementById('paletteRow').querySelector('.palette').classList.toggle('disabled', on);
+/* ===== 차단(촬영불가) 헬퍼: 현재 배경 이벤트를 스캔해서 판정 ===== */
+function isBlockedYMD(ymd){
+  const evs = calendar.getEvents().filter(e=> e.display==='background' && e.extendedProps?.blocked);
+  for(const e of evs){
+    const s = toLocalYMD(e.start);
+    const eEnd = e.end ? new Date(e.end.getTime()-1) : e.start;
+    const endY = toLocalYMD(eEnd);
+    if (s <= ymd && ymd <= endY) return true;
+  }
+  return false;
 }
-evBlocked.addEventListener('change', toggleTimeInputsByBlocked);
-
-/* 장소 변경 → 기본색 자동 선택(직접 선택 전일 때만) */
-evPlace.addEventListener('change', ()=>{
-  if (manualColor) return;
-  const place = getSelectValue(evPlace, evPlaceCustom);
-  selectColor(defaultColorForPlace(place));
-});
+function rangeHasBlocked(startDateObj, endDateObj){ // inclusive days
+  let cur = new Date(startDateObj.getFullYear(), startDateObj.getMonth(), startDateObj.getDate());
+  const last = new Date(endDateObj.getFullYear(), endDateObj.getMonth(), endDateObj.getDate());
+  while(true){
+    const ymd = toLocalYMD(cur);
+    if (isBlockedYMD(ymd)) return true;
+    if (ymd === toLocalYMD(last)) break;
+    cur.setDate(cur.getDate()+1);
+  }
+  return false;
+}
 
 /* ===== 상태 ===== */
 let currentEditingId=null, calendar, currentSearch="", dblTimer=null;
-let blockedDateSet = new Set(); // yyyy-mm-dd
 
 /* ===== API ===== */
 async function apiRange(startStr, endStr, includeDeleted=false){
@@ -329,17 +326,13 @@ async function apiRange(startStr, endStr, includeDeleted=false){
   try{
     const r = await fetch(url, { method:'GET', headers:{'Accept':'application/json'} });
     const ct = (r.headers.get('content-type')||'').toLowerCase();
-    if(!r.ok){
-      return {ok:false, error:'HTTP_'+r.status};
-    }
+    if(!r.ok){ return {ok:false, error:'HTTP_'+r.status}; }
     if(!ct.includes('application/json')){
       const body = await r.text();
       return {ok:false, error:'NON_JSON', body: body.slice(0,500)};
     }
     return await r.json();
-  }catch(e){
-    return {ok:false, error:'NETWORK', detail:String(e)};
-  }
+  }catch(e){ return {ok:false, error:'NETWORK', detail:String(e)}; }
 }
 async function apiCreate(p){
   if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
@@ -398,12 +391,8 @@ function openModal(mode, d={}){
 
   manualColor = false;
   renderPalette(null);
-  if (mode==='edit' && d.color){
-    selectColor(d.color); manualColor = true;
-  } else {
-    const def = defaultColorForPlace(getSelectValue(evPlace, evPlaceCustom));
-    selectColor(def);
-  }
+  if (mode==='edit' && d.color){ selectColor(d.color); manualColor = true; }
+  else { selectColor(defaultColorForPlace(getSelectValue(evPlace, evPlaceCustom))); }
 
   toggleTimeInputsByBlocked();
   currentEditingId = d.id || null;
@@ -422,27 +411,26 @@ function safeInit(){
     headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay,listWeek'},
     locale:'ko', selectable:true, editable:true, nowIndicator:true,
 
-    dayCellClassNames: (arg)=>{
-      const ds = `${arg.date.getFullYear()}-${pad2(arg.date.getMonth()+1)}-${pad2(arg.date.getDate())}`;
-      return blockedDateSet.has(ds) ? ['blocked-day'] : [];
-    },
-
+    /* 날짜 드래그 선택 시, 차단일 포함되면 금지 */
     select: (info)=>{
       if(!EDIT_MODE) return;
-      const startY = toLocalYMD(info.start);
-      const endY   = toLocalYMD(new Date(info.end.getTime()-1));
-      let cur = startY, blockedHit=false;
-      while(true){ if(blockedDateSet.has(cur)){ blockedHit=true; break; } if(cur===endY) break; cur = addDays(cur,1); }
-      if(blockedHit){ alert('촬영 불가 기간에는 새 일정을 추가할 수 없습니다.'); calendar.unselect(); return; }
+      const startY = new Date(info.start.getFullYear(), info.start.getMonth(), info.start.getDate());
+      const endY   = new Date(info.end.getFullYear(),   info.end.getMonth(),   info.end.getDate()-1);
+      if (rangeHasBlocked(startY, endY)) {
+        alert('촬영 불가 기간에는 새 일정을 추가할 수 없습니다.');
+        calendar.unselect();
+        return;
+      }
       openModal('create',{baseDate:info.start});
     },
 
     dateClick: async (info)=>{
       if(!EDIT_MODE) return;
       const ymd = toLocalYMD(info.date);
-      if (blockedDateSet.has(ymd)) {
+      if (isBlockedYMD(ymd)) {
+        // 해당 배경 이벤트(촬영불가) 찾아서 삭제 버튼 제공
         const targets = calendar.getEvents().filter(ev=>{
-          if (ev.display !== 'background') return false;
+          if (ev.display !== 'background' || !ev.extendedProps?.blocked) return false;
           const s = toLocalYMD(ev.start);
           const e = toLocalYMD(new Date((ev.end || ev.start).getTime() - 1));
           return (s <= ymd && ymd <= e);
@@ -515,20 +503,16 @@ function safeInit(){
       }
     },
 
-    /* ===== 이벤트 로딩 (여기서 에러 원인 친절히 보여줌) ===== */
+    /* ===== 이벤트 로딩 ===== */
     events: async (fetchInfo, success, failure)=>{
       try{
         statusEl.textContent="불러오는 중...";
         const j = await apiRange(fetchInfo.startStr, fetchInfo.endStr);
         if(!j || !j.ok){
           let tip = '';
-          if (j && j.error === 'NON_JSON') {
-            tip = ' (로그인/권한 페이지가 반환됨 → Apps Script 배포 접근 권한을 "Anyone"으로 설정하세요)';
-          } else if (j && j.error && j.error.startsWith('HTTP_')) {
-            tip = ' (HTTP 오류: ' + j.error.replace('HTTP_','') + ')';
-          } else if (j && j.error === 'NETWORK') {
-            tip = ' (네트워크 문제)';
-          }
+          if (j && j.error === 'NON_JSON') tip = ' (로그인/권한 페이지가 반환됨 → Apps Script 배포 접근 권한을 "Anyone"으로 설정하세요)';
+          else if (j && j.error && j.error.startsWith('HTTP_')) tip = ' (HTTP 오류: ' + j.error.replace('HTTP_','') + ')';
+          else if (j && j.error === 'NETWORK') tip = ' (네트워크 문제)';
           document.getElementById('loadError').style.display='block';
           document.getElementById('loadError').textContent = 'API 오류: ' + (j? j.error : 'UNKNOWN') + tip;
           failure();
@@ -536,7 +520,6 @@ function safeInit(){
           return;
         }
 
-        blockedDateSet = new Set();
         const evs=[];
         (j.events||[]).forEach(r=>{
           const isBlocked = !!r['촬영불가'];
@@ -545,7 +528,6 @@ function safeInit(){
             let d1 = toLocalYMD(r['종료일시']) || d0;
             if(!d0) return;
             if(d0 > d1){ const tmp=d0; d0=d1; d1=tmp; }
-            let cur=d0; while(true){ blockedDateSet.add(cur); if(cur===d1) break; cur = addDays(cur,1); }
             evs.push({
               id: r['id'] + '_bg',
               display: 'background',
@@ -580,7 +562,6 @@ function safeInit(){
         });
 
         success(evs);
-        calendar.rerenderDates();
         statusEl.textContent="완료";
       }catch(e){
         console.error(e);

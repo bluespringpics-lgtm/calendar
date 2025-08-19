@@ -82,7 +82,7 @@
   <div id="loadError">FullCalendar 로딩에 실패했습니다. 잠시 후 새로고침하거나 다른 네트워크에서 접속해보세요.</div>
 
   <div class="wrap">
-    <div class="hint">· 편집은 관리자만 가능합니다.</b>.</div>
+    <div class="hint">· 편집은 관리자만 가능합니다.</div>
     <div id="calendar"></div>
   </div>
 
@@ -99,7 +99,7 @@
       <div class="content">
         <form id="eventForm">
           <input type="hidden" id="evId">
-          <input type="hidden" id="evColor"> <!-- 선택된 색상 코드 저장 -->
+          <input type="hidden" id="evColor">
 
           <div class="row">
             <div>
@@ -191,11 +191,22 @@
 const APP_URL = "https://script.google.com/macros/s/AKfycbx4-W5RvGEQQHbwa77jFgI9mgZWmsN2unt42S42RyGynggEYjyFOY3s595nhPcmrbAQ/exec";
 let EDIT_MODE=false, ADMIN_KEY_RUNTIME=null;
 
+/* ===== REV 동기화(서버 캐시와 즉시 반영용) ===== */
+let REV = null;
+async function syncRev(){
+  try{
+    const r = await fetch(APP_URL + (APP_URL.includes('?')?'&':'?') + 'action=rev&_t=' + Date.now());
+    const j = await r.json();
+    if(j && j.ok && j.rev) REV = String(j.rev);
+  }catch(_){}
+}
+
 /* ===== 편집 UI & 비번 검증 ===== */
 const editBadge=document.getElementById('editBadge');
 function updateEditUI(){ editBadge.textContent=`편집 모드: ${EDIT_MODE?'ON':'OFF'}`; editBadge.className=`badge ${EDIT_MODE?'on':'off'}`; document.getElementById('btnAdd').classList.toggle('disabled',!EDIT_MODE); }
+
 async function apiVerify(key){
-  // POST 우선, 실패시 GET 폴백(배포 환경 이슈 대비)
+  // POST 우선, 실패시 GET 폴백
   try{
     const r = await fetch(APP_URL,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ adminKey:key, action:'verify' }) });
     const t = await r.text();
@@ -206,6 +217,7 @@ async function apiVerify(key){
     const r2 = await fetch(u); const j2 = await r2.json().catch(()=>({ok:false})); return !!j2.ok;
   }catch(_){ return false; }
 }
+
 document.getElementById('btnToggleEdit').onclick = async ()=>{
   if(!EDIT_MODE){
     let k = prompt('관리 비밀번호 입력 (영문/숫자 전용)');
@@ -254,7 +266,7 @@ const PALETTE = [
 const colorPaletteEl = document.getElementById('colorPalette');
 const evColor = document.getElementById('evColor');
 const colorPreview = document.getElementById('colorPreview');
-let manualColor = false; // 사용자가 직접 클릭했는지
+let manualColor = false;
 let selectedColorIdx = null; // 1..8
 
 function renderPalette(selectedIdx){
@@ -279,20 +291,20 @@ function renderPalette(selectedIdx){
 function selectColor(idx, byUser=false){
   selectedColorIdx = idx;
   const color = PALETTE[idx-1] || '';
-  evColor.value = color;
+  evColor.value = color;                              // 저장에 쓰일 실제 값
   colorPreview.style.backgroundColor = color || 'transparent';
   if (byUser) manualColor = true;
-  // 토글: 인덱스 비교(문자열 비교 대신)
   [...colorPaletteEl.querySelectorAll('.swatch')].forEach(el=>{
     el.classList.toggle('selected', Number(el.dataset.idx)===idx);
   });
 }
+
 /* 장소→기본색: 마포=1, 일산=2, 그 외=3 */
 function defaultColorIndexForPlace(place){
   const p = String(place||'').toLowerCase();
   if (p.includes('마포'))  return 1;
   if (p.includes('일산'))  return 2;
-  return 3; // 기타/빈값/__custom
+  return 3;
 }
 
 /* ===== 시간 옵션 ===== */
@@ -328,7 +340,7 @@ function toggleTimeInputsByBlocked(){
 }
 evBlocked.addEventListener('change', toggleTimeInputsByBlocked);
 
-/* 장소 변경 → 기본색 자동 선택(사용자가 아직 직접 선택 안 했을 때만) */
+/* 장소 변경 → 기본색 자동 선택(직접선택 이전에만) */
 evPlace.addEventListener('change', ()=>{
   if (manualColor) return;
   const place = getSelectValue(evPlace, evPlaceCustom);
@@ -343,17 +355,43 @@ let blockedDateSet = new Set(); // yyyy-mm-dd
 function addCacheBust(url){
   return url + (url.includes('?')?'&':'?') + '_t=' + Date.now();
 }
+
+// 목록 조회는 rev + thin=1로 빠르게(서버 캐시 활용)
 async function apiRange(startStr, endStr, includeDeleted=false, thin=true){
-  const q = new URLSearchParams({ start:startStr, end:endStr });
+  const q = new URLSearchParams({
+    start: startStr,
+    end: endStr
+  });
   if (includeDeleted) q.set('includeDeleted','1');
-  if (thin) q.set('thin','1'); // 속도 가벼움
-  const url = addCacheBust(APP_URL + (APP_URL.includes('?')?'&':'?') + q.toString());
+  if (thin) q.set('thin','1');
+  if (REV) q.set('rev', REV);     // 서버 캐시 키에 반영
+  const url = APP_URL + (APP_URL.includes('?')?'&':'?') + q.toString();
   const r = await fetch(url);
   return r.json();
 }
-async function apiCreate(p){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(addCacheBust(APP_URL),{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
-async function apiUpdate(p){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(addCacheBust(APP_URL),{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
-async function apiDelete(id){ if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; } try{ const r=await fetch(addCacheBust(APP_URL),{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})}); return await r.json(); }catch(e){return {ok:false,error:'NETWORK'};} }
+
+// 쓰기 계열은 항상 POST (Apps Script 캐시 영향 없음)
+async function apiCreate(p){
+  if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
+  try{
+    const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})});
+    return await r.json();
+  }catch(e){return {ok:false,error:'NETWORK'};}
+}
+async function apiUpdate(p){
+  if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
+  try{
+    const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})});
+    return await r.json();
+  }catch(e){return {ok:false,error:'NETWORK'};}
+}
+async function apiDelete(id){
+  if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
+  try{
+    const r=await fetch(APP_URL,{method:'POST',body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})});
+    return await r.json();
+  }catch(e){return {ok:false,error:'NETWORK'};}
+}
 
 /* ===== 모달 ===== */
 function openModal(mode, d={}){
@@ -400,7 +438,7 @@ function openModal(mode, d={}){
     return defaultColorIndexForPlace(getSelectValue(evPlace, evPlaceCustom));
   })();
   renderPalette(initIdx);
-  selectColor(initIdx, mode==='edit' && !!d.color); // 수정모드 컬러 있으면 byUser로 취급
+  selectColor(initIdx, mode==='edit' && !!d.color); // 수정모드에 색 있으면 byUser로 표기
 
   toggleTimeInputsByBlocked();
   currentEditingId = d.id || null;
@@ -451,6 +489,7 @@ function safeInit(){
             const r = await apiDelete(id);
             if(!r || !r.ok){ alert('삭제 실패: ' + (r?.error || 'UNKNOWN')); break; }
           }
+          await syncRev();
           calendar.refetchEvents();
         }
         return;
@@ -467,6 +506,7 @@ function safeInit(){
         if(confirm('이 촬영 불가를 삭제할까요?')){
           const r = await apiDelete(id);
           if(!r || !r.ok){ alert('삭제 실패: ' + (r?.error || 'UNKNOWN')); return; }
+          await syncRev();
           calendar.refetchEvents();
         }
         return;
@@ -481,8 +521,16 @@ function safeInit(){
       });
     },
 
-    eventDrop: async (info)=>{ if(!EDIT_MODE){ info.revert(); return; } const r=await apiUpdate({id:info.event.id, 시작일시:toLocalStr(info.event.start), 종료일시:info.event.end?toLocalStr(info.event.end):""}); if(!r.ok){ alert('이동 실패'); info.revert(); } else { statusEl.textContent='이동 저장됨'; } },
-    eventResize: async (info)=>{ if(!EDIT_MODE){ info.revert(); return; } const r=await apiUpdate({id:info.event.id, 종료일시:info.event.end?toLocalStr(info.event.end):""}); if(!r.ok){ alert('시간 변경 실패'); info.revert(); } else { statusEl.textContent='시간 변경 저장됨'; } },
+    eventDrop: async (info)=>{ 
+      if(!EDIT_MODE){ info.revert(); return; }
+      const r=await apiUpdate({id:info.event.id, 시작일시:toLocalStr(info.event.start), 종료일시:info.event.end?toLocalStr(info.event.end):""});
+      if(!r.ok){ alert('이동 실패'); info.revert(); } else { statusEl.textContent='이동 저장됨'; await syncRev(); }
+    },
+    eventResize: async (info)=>{ 
+      if(!EDIT_MODE){ info.revert(); return; }
+      const r=await apiUpdate({id:info.event.id, 종료일시:info.event.end?toLocalStr(info.event.end):""});
+      if(!r.ok){ alert('시간 변경 실패'); info.revert(); } else { statusEl.textContent='시간 변경 저장됨'; await syncRev(); }
+    },
 
     eventContent: (arg)=>{
       if(arg.event.display==='background') return;
@@ -501,14 +549,13 @@ function safeInit(){
       if (!p.blocked && info.event.display!=='background'){
         const el = info.el;
         const c  = p.color || (p.place ? (['','rgba(16,185,129,0.18)','rgba(245,158,11,0.20)','rgba(250,204,21,0.20)'][ defaultColorIndexForPlace(p.place) ] ) : 'rgba(250,204,21,0.20)');
-        // 명시적으로 색 지정
         el.style.backgroundColor = c;
         el.style.borderColor = c;
         el.style.color = '#111';
       }
     },
 
-    // 범위만 가져오기(thin=1)
+    // 범위만 가져오기(thin=1, rev 사용)
     events: async (fetchInfo, success, failure)=>{
       try{
         statusEl.textContent="불러오는 중...";
@@ -550,7 +597,7 @@ function safeInit(){
               place:r['장소']||'',
               blocked:false,
               color:r['색상']||'',
-              description:'' // thin 응답에선 메모 제외
+              description:'' // thin 응답: 메모 제외
             }
           });
         });
@@ -563,28 +610,37 @@ function safeInit(){
 
   calendar.render();
 
-  // 검색
+  // 검색(가벼운 디바운스)
   const searchInput=document.getElementById("searchInput");
+  let searchTimer=null;
   searchInput.addEventListener("input",()=>{
-    currentSearch=(searchInput.value||"").trim().toLowerCase();
-    calendar.getEvents().forEach(e=>{
-      if(e.display==='background') return;
-      const p=e.extendedProps||{};
-      const hay=(e.title+" "+(p.type||"")+" "+(p.pkg||"")+" "+(p.place||"")+" "+(p.description||"")).toLowerCase();
-      e.setProp('display', currentSearch? (hay.includes(currentSearch)?'auto':'none') : 'auto');
-    });
+    clearTimeout(searchTimer);
+    searchTimer=setTimeout(()=>{
+      currentSearch=(searchInput.value||"").trim().toLowerCase();
+      calendar.getEvents().forEach(e=>{
+        if(e.display==='background') return;
+        const p=e.extendedProps||{};
+        const hay=(e.title+" "+(p.type||"")+" "+(p.pkg||"")+" "+(p.place||"")+" "+(p.description||"")).toLowerCase();
+        e.setProp('display', currentSearch? (hay.includes(currentSearch)?'auto':'none') : 'auto');
+      });
+    },120);
   });
 
   document.getElementById("btnAdd").onclick=()=>{ if(!EDIT_MODE) return; openModal('create',{baseDate:new Date()}); };
-  document.getElementById("btnReload").onclick=()=> calendar.refetchEvents();
+  document.getElementById("btnReload").onclick=async ()=>{ await syncRev(); calendar.refetchEvents(); };
 
-  // 모달이 열려 있을 때 숫자 1~8로 색상 선택 단축키
+  // 모달 열려있을 때 1~8로 색상 단축키
   document.addEventListener('keydown',(ev)=>{
     if (modalBg.style.display!=='flex') return;
     if (ev.key>='1' && ev.key<='8'){ selectColor(Number(ev.key), true); }
   });
 }
-window.addEventListener('load', safeInit);
+
+// 페이지 로드시, rev 먼저 동기화 → 캘린더 초기화
+window.addEventListener('load', async ()=>{
+  await syncRev();
+  safeInit();
+});
 
 /* ===== 저장/삭제 ===== */
 form.addEventListener("submit", async (e)=>{
@@ -599,16 +655,22 @@ form.addEventListener("submit", async (e)=>{
 
     let sDate=startDate.value, eDate=endDate.value, sHour=startHour.value, eHour=endHour.value, sMin=startMin.value, eMin=endMin.value;
 
-    if (blocked) { const d0=sDate||eDate||toLocalYMD(new Date()); const d1=eDate||d0; sDate=d0; sHour='00'; sMin='00'; eDate=d1; eHour='23'; eMin='59'; }
-    else {
-      if(!sDate || !eDate){ const {start,end}=defaultStartEndFrom(new Date()); const ss=parseToFormParts(toLocalStr(start)), ee=parseToFormParts(toLocalStr(end)); sDate=sDate||ss.date; sHour=sHour||ss.hour; sMin=sMin||ss.min; eDate=eDate||ee.date; eHour=eHour||ee.hour; eMin=eMin||ee.min; }
+    if (blocked) {
+      const d0=sDate||eDate||toLocalYMD(new Date()); const d1=eDate||d0;
+      sDate=d0; sHour='00'; sMin='00'; eDate=d1; eHour='23'; eMin='59';
+    } else {
+      if(!sDate || !eDate){
+        const {start,end}=defaultStartEndFrom(new Date());
+        const ss=parseToFormParts(toLocalStr(start)), ee=parseToFormParts(toLocalStr(end));
+        sDate=sDate||ss.date; sHour=sHour||ss.hour; sMin=sMin||ss.min; eDate=eDate||ee.date; eHour=eHour||ee.hour; eMin=eMin||ee.min;
+      }
     }
 
     const startStr=buildDateTime(sDate,sHour,sMin), endStr=buildDateTime(eDate,eHour,eMin);
     if(blocked && !title) title="촬영불가";
     if(!blocked && !title){ alert("예약자명을 입력해주세요."); return; }
 
-    // 충돌 검사(thin=1로 충분)
+    // 충돌 검사(thin=1)
     const checkRange = await apiRange(startStr.slice(0,10), addDays(endStr.slice(0,10), 1), false, true);
     if (!checkRange || !checkRange.ok) { alert('현재 일정 목록을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
     const overlaps = (a1,a2,b1,b2)=> (a1 < b2) && (a2 > b1);
@@ -625,7 +687,7 @@ form.addEventListener("submit", async (e)=>{
     }
     if (conflictMsg) { alert(conflictMsg); return; }
 
-    // 색상: 사용자 설정 우선, 없으면 장소 기본색
+    // 색상: 사용자 선택 우선, 없으면 장소 기본색
     const colorFinal = evColor.value || PALETTE[ defaultColorIndexForPlace(place)-1 ];
 
     const payload={ id:isEdit?currentEditingId:undefined, 예약자명:title, 종류:type, 상품:pkg, 장소:place,
@@ -635,7 +697,9 @@ form.addEventListener("submit", async (e)=>{
     const r=isEdit? await apiUpdate(payload): await apiCreate(payload);
     if(!r || !r.ok){ alert("저장 실패"); statusEl.textContent = "저장 실패"; return; }
 
-    closeModal(); calendar.refetchEvents();
+    closeModal();
+    await syncRev();             // ← 서버 캐시 키 갱신
+    calendar.refetchEvents();    // ← 새 색상/변경 즉시 반영
     statusEl.textContent = "저장 완료";
   }catch(err){ console.error(err); alert("저장 중 예기치 않은 오류: " + String(err)); statusEl.textContent = "오류"; }
 });
@@ -648,13 +712,10 @@ btnDelete.onclick = async ()=>{
     alert("삭제 실패: " + (r?.error || "UNKNOWN"));
     return;
   }
-  closeModal(); calendar.refetchEvents();
+  closeModal();
+  await syncRev();
+  calendar.refetchEvents();
 };
 </script>
 </body>
 </html>
-
-
-
-
-

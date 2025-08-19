@@ -50,7 +50,6 @@
   }
   .fc-timegrid-col.blocked-day, .fc-list-day.blocked-day{ background:rgba(156,163,175,0.18) !important; }
 
-  /* 팔레트 */
   .palette{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .swatch{width:28px;height:28px;border-radius:999px;border:1px solid var(--line);cursor:pointer;position:relative;display:inline-block}
   .swatch[data-idx]::after{
@@ -188,7 +187,7 @@
 
 <script>
 /* ===== 설정 ===== */
-const APP_URL = "https://script.google.com/macros/s/AKfycbx04mKmR26ISevp21T9TNM6FjeMIkDM7mJNMiaP_TJeQfeoGVwYXX-O6q_RIF6XzNHo/exec";
+const APP_URL = "https://script.google.com/macros/s/AKfycbwy-AmUxByRSxVw0uZSp9KfUdR7s4dG9LpHmdTWYI5Vnwh_uTjqLvB-6XFag1JVY3ua/exec";
 let EDIT_MODE=false, ADMIN_KEY_RUNTIME=null;
 
 /* ===== 편집 UI & 비번 검증 ===== */
@@ -200,12 +199,13 @@ function updateEditUI(){
 }
 
 // 견고한 검증: POST(JSON) → 실패 시 GET 폴백(+캐시버스트)
+// 중요: 프리플라이트 회피를 위해 'Content-Type' 헤더를 보내지 않습니다.
 async function apiVerify(key){
   const payload = { adminKey:key, action:'verify' };
   try{
     const r = await fetch(APP_URL,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      // headers:{'Content-Type':'application/json'}, // ❌ 제거
       body: JSON.stringify(payload)
     });
     const text = await r.text();
@@ -213,7 +213,6 @@ async function apiVerify(key){
       const j = JSON.parse(text);
       return !!j.ok;
     }catch(_){
-      // HTML이 온 경우 etc. → GET 폴백
       const u = APP_URL + (APP_URL.includes('?')?'&':'?')
         + 'action=verify&adminKey=' + encodeURIComponent(key) + '&_t=' + Date.now();
       const r2 = await fetch(u);
@@ -221,7 +220,6 @@ async function apiVerify(key){
       return !!j2.ok;
     }
   }catch(_e){
-    // 네트워크 예외 → GET 폴백
     try{
       const u = APP_URL + (APP_URL.includes('?')?'&':'?')
         + 'action=verify&adminKey=' + encodeURIComponent(key) + '&_t=' + Date.now();
@@ -232,16 +230,15 @@ async function apiVerify(key){
   }
 }
 
-// ASCII 외 입력 제거(prompt)
 document.getElementById('btnToggleEdit').onclick = async ()=>{
   if(!EDIT_MODE){
-    let k = prompt('관리 비밀번호 입력 (영문/숫자 전용)');
+    let k = prompt('관리 비밀번호 입력 (숫자 0314)');
     if(!k) return;
     const filtered = k.replace(/[^\x20-\x7E]/g, '');
     if (!filtered.trim()) return;
     const ok = await apiVerify(filtered.trim());
     if(!ok){
-      alert('비밀번호가 올바르지 않거나 서버 응답 오류입니다.');
+      alert('비밀번호가 올바르지 않거나 서버 응답 오류입니다.\n(현재 서버 비밀번호는 0314 입니다)');
       EDIT_MODE=false; ADMIN_KEY_RUNTIME=null; updateEditUI(); return;
     }
     ADMIN_KEY_RUNTIME = filtered.trim(); EDIT_MODE = true; updateEditUI();
@@ -270,16 +267,11 @@ function toLocalYMD(s){
 function addDays(dateStr, days){ const [y,m,d] = dateStr.split('-').map(n=>parseInt(n,10)); const dt = new Date(y, m-1, d); dt.setDate(dt.getDate() + (days||0)); return `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}`; }
 function hourLabel(startISO,endISO){ if(!startISO) return ''; const sh = parseInt(startISO.split('T')[1].split(':')[0],10); const eh = endISO ? parseInt(endISO.split('T')[1].split(':')[0],10) : sh; return `${pad2(sh)}-${pad2(eh)}`.replace(/^0/,''); }
 
-/* ===== 팔레트(연한색 8종) ===== */
+/* ===== 팔레트 ===== */
 const PALETTE = [
-  'rgba(16,185,129,0.18)',  // 1 마포 기본(연초록)
-  'rgba(245,158,11,0.20)',  // 2 일산 기본(연주황)
-  'rgba(250,204,21,0.20)',  // 3 기타 기본(연노랑)
-  'rgba(96,165,250,0.20)',  // 4 연파랑
-  'rgba(244,114,182,0.20)', // 5 연핑크
-  'rgba(167,139,250,0.20)', // 6 연보라
-  'rgba(34,197,94,0.18)',   // 7 연초록2
-  'rgba(20,184,166,0.20)'   // 8 연청록
+  'rgba(16,185,129,0.18)', 'rgba(245,158,11,0.20)', 'rgba(250,204,21,0.20)',
+  'rgba(96,165,250,0.20)', 'rgba(244,114,182,0.20)', 'rgba(167,139,250,0.20)',
+  'rgba(34,197,94,0.18)',  'rgba(20,184,166,0.20)'
 ];
 const colorPaletteEl = document.getElementById('colorPalette');
 const evColor = document.getElementById('evColor');
@@ -367,30 +359,21 @@ async function apiRange(startStr, endStr, includeDeleted=false){
 async function apiCreate(p){
   if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
   try{
-    const r=await fetch(addCacheBust(APP_URL),{
-      method:'POST',
-      body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p})
-    });
+    const r=await fetch(addCacheBust(APP_URL),{ method:'POST', body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'create',event:p}) });
     return await r.json();
   }catch(e){return {ok:false,error:'NETWORK'};}
 }
 async function apiUpdate(p){
   if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
   try{
-    const r=await fetch(addCacheBust(APP_URL),{
-      method:'POST',
-      body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p})
-    });
+    const r=await fetch(addCacheBust(APP_URL),{ method:'POST', body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'update',event:p}) });
     return await r.json();
   }catch(e){return {ok:false,error:'NETWORK'};}
 }
 async function apiDelete(id){
   if(!EDIT_MODE||!ADMIN_KEY_RUNTIME){ alert('편집 모드를 켜고 비밀번호를 입력해주세요.'); return {ok:false}; }
   try{
-    const r=await fetch(addCacheBust(APP_URL),{
-      method:'POST',
-      body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id})
-    });
+    const r=await fetch(addCacheBust(APP_URL),{ method:'POST', body:JSON.stringify({adminKey:ADMIN_KEY_RUNTIME,action:'delete',id}) });
     return await r.json();
   }catch(e){return {ok:false,error:'NETWORK'};}
 }
@@ -492,7 +475,7 @@ function safeInit(){
               break;
             }
           }
-          calendar.refetchEvents(); // ← for-loop 바깥에서 호출 (괄호 누락 수정)
+          calendar.refetchEvents();
         }
         return;
       }
@@ -596,7 +579,8 @@ function safeInit(){
         });
 
         success(evs);
-        // v6엔 rerenderDates 없음. 호출 금지!
+        // v6에는 rerenderDates 없음. 필요하면 다음 줄을 임시로 풀어 강제 리렌더:
+        // calendar.changeView(calendar.view.type);
         statusEl.textContent="완료";
       }catch(e){ console.error(e); failure(e); statusEl.textContent="오류"; }
     }
@@ -622,7 +606,6 @@ function safeInit(){
 window.addEventListener('load', safeInit);
 
 /* ===== 저장/삭제 ===== */
-const form=document.getElementById("eventForm");
 form.addEventListener("submit", async (e)=>{
   e.preventDefault();
   if(!EDIT_MODE){ alert('편집 모드를 켜세요.'); return; }
@@ -693,5 +676,3 @@ btnDelete.onclick = async ()=>{
 </script>
 </body>
 </html>
-
-

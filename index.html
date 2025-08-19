@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>내 캘린더 – 조회 공개 / 편집 비밀번호</title>
+<title>청춘낙서 예약현황</title>
 
 <link rel="stylesheet" href="https://unpkg.com/fullcalendar@6.1.15/index.global.min.css">
 <script src="https://unpkg.com/fullcalendar@6.1.15/index.global.min.js" defer></script>
@@ -68,7 +68,7 @@
   <header>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <h1>내 캘린더</h1>
-      <div class="search"><input id="searchInput" type="text" placeholder="검색(예약자명/종류/상품/장소/메모)  / 를 눌러보세요"></div>
+      <div class="search"><input id="searchInput" type="text" placeholder="검색"></div>
       <span id="status" style="font-size:12px;color:#6b7280"></span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -83,7 +83,7 @@
   <div id="loadError">FullCalendar 로딩에 실패했습니다. 잠시 후 새로고침하거나 다른 네트워크에서 접속해보세요.</div>
 
   <div class="wrap">
-    <div class="hint">· 11:00~15:00 기본 · 24시간(분 00/30) · 표시는 <b>11-15 김OO</b> · 삭제=소프트 삭제 · 조회 누구나 / <b>편집=비번</b>.</div>
+    <div class="hint">· 편집은 관리자만 가능합니.</div>
     <div id="calendar"></div>
   </div>
 
@@ -683,3 +683,4 @@ btnDelete.onclick = async ()=>{
 </script>
 </body>
 </html>
+
